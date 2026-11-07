@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Windows download markers copied into WSL
+*:Zone.Identifier
+
+# Insider working notes
+README.internal.md
+
+# Datasets, experiment output and model checkpoints are never committed
+/data/
+/results/
+*.pt
+*.pkl
+*.joblib
