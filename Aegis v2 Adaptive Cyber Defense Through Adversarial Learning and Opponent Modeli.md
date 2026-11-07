@@ -107,7 +107,11 @@ The GAN is postponed, not abandoned. A generator is worth adding only if it impr
 
 The work runs in five phases; each ends in a measured gate before the next begins. Dates are open until the available weeks and weekly hours are known.
 
-&#91;embedded content: roadmap · 5 phases, 5 gates\]
+1. **Foundation and baseline:** environment, data pipeline, Config A. Gate: Config A measured on held-out families.
+2. **Fixed adversarial scenarios:** realization layer, scripted attacker, Config B. Gate: Config B measured against A.
+3. **Co-training:** RL attacker, historical league, Config C. Gate: C compared with A and B on held-out families.
+4. **Opponent modeling:** prediction models, Configs D and E. Gate: D and E compared with C.
+5. **Evaluation and write-up:** cross-dataset, sensitivity analysis, statistics. Gate: claims backed by seeds and intervals.
 
 Each gate is a measurement, not a date: a phase closes only when its configuration has been evaluated on held-out attack families.
 
