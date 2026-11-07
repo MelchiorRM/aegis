@@ -51,7 +51,7 @@ choice was made after seeing test results.
 
 Each phase closes on a measurement, not a date.
 
-- [ ] **Phase 1, foundation and baseline:** Config A measured on real held-out families; artifact-resistance run pending
+- [ ] **Phase 1, foundation and baseline:** Config A measured on real held-out families; stays open until the artifact audit is complete
 - [ ] **Phase 2, fixed adversarial scenarios:** traffic realization layer, scripted attacker, Config B
 - [ ] **Phase 3, co-training:** RL attacker, historical league, Config C
 - [ ] **Phase 4, opponent modeling:** prediction models, Configs D and E
@@ -63,9 +63,16 @@ Each phase closes on a measurement, not a date.
   and encoder are fit on training rows only. Class weights replace SMOTE.
 - **Unseen families:** each eligible attack family is removed from training and validation,
   then its recall is compared with a model that saw it, on the same test flows.
-- **Dataset shortcuts:** each treatment refits the baseline on the same folds, in its own output
-  folder: near-duplicates removed, TCP windows removed, missing-value markers neutralized, and
-  recall compared on raw and deduplicated rows. No label is changed.
+- **Dataset shortcuts:** a sensitivity audit of the selected baseline, not an unbiased estimate of
+  generalization. Each treatment refits the baseline on the same folds, in its own output folder,
+  and is scored on identical held-out rows: near-duplicates removed, TCP windows removed, markers
+  neutralized, UNSW-NB15 `ct_*` counts removed, and those controls combined. Raw published rows are
+  primary, and deduplicated rows are secondary. A result is shortcut-dependent only if the mean
+  per-seed recall drop is at least 0.10 and its 95% interval lies above zero.
+- **Labels:** no label is changed. 38,045 CICIDS2017 benign rows that may be attack replies stay in
+  the primary evaluation, and a separate run reports the effect of excluding them.
+- **Final claims:** generalization claims need an untouched evaluation set or a nested protocol,
+  which these results are not.
 - **Thresholds:** set from validation benign traffic only, with the false-positive rate
   actually reached reported alongside.
 - **Realistic prevalence:** PR-AUC and precision are reweighted to assumed attack shares of
@@ -107,7 +114,7 @@ Full runs use [notebooks/config_a_baseline.ipynb](notebooks/config_a_baseline.ip
 embeds the package source and can run on Colab or Kaggle without a clone. Use a machine with
 more than 12 GB of RAM. Interrupted runs continue from the last finished fold.
 [notebooks/artifact_resistance.ipynb](notebooks/artifact_resistance.ipynb) runs the shortcut
-treatments the same way and writes to `results/config_a_artifacts`, leaving Config A results alone.
+audit the same way and writes to `results/config_a_artifacts`, leaving Config A results alone.
 
 After changing anything in `src/`, rebuild both notebooks. A test fails if either is out of date:
 

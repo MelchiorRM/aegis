@@ -97,14 +97,17 @@ The protocol exists to stop two agents from becoming good only at playing each o
 - **Three environments:** training (both agents learn), validation (tune models and strategies), holdout (unseen scenarios, touched once at the end).
 - **Leakage control:** split before any resampling; fit scalers and encoders on training data only; use class weights instead of SMOTE where possible.
 - **Unseen families:** leave-one-attack-family-out on CICIDS2017 and UNSW-NB15; attack families in the holdout are never seen by the defender or the attacker's generator.
-- **Artifact resistance:** a held-out result counts as generalization only after it is tested against dataset shortcuts. Each treatment refits the baseline on the same folds, in a separate output folder that preserves earlier results:
+- **Artifact resistance:** a held-out result counts as generalization only after it is tested against dataset shortcuts. This run is an artifact-resistance and sensitivity audit of the selected baseline, not an unbiased estimate of final generalization, because that baseline was chosen using the same test results. Each treatment refits the baseline on the same folds, in a separate output folder that preserves earlier results:
   - **Near-duplicates:** remove training attack rows that match the held-out family apart from timing.
-  - **Duplicate handling:** compare recall on deduplicated rows with recall on all published rows.
+  - **Duplicate handling:** recall on all published rows is primary. Recall on deduplicated rows is a secondary sensitivity analysis.
   - **Host fingerprints:** remove TCP window features.
   - **Missingness:** neutralize missing-value markers, and test a model that sees only those markers.
-  - **Combined:** apply the near-duplicate, TCP window and marker controls together.
-- **Shortcut rule:** at the primary false-positive rate, a family's result is shortcut-dependent if a treatment lowers its recall by at least 0.10 and the paired interval excludes zero. This rule was set before the artifact-resistance run.
-- **Labels:** no label is changed because of a suspected error. Suspect traffic is examined in its original capture context, and any later change is reported as a separate sensitivity analysis.
+  - **UNSW-NB15 `service`:** the publisher defines `-` as "not much used service", so it is a catch-all category and not missing data. Compare the column removed, `-` kept as a category (the reference), and the column reduced to a flag for `-`.
+  - **Context counts:** remove the UNSW-NB15 `ct_*` features, to isolate family-specific dependence on them.
+  - **Combined:** apply the near-duplicate, TCP window and marker controls together, as a conservative baseline against several shortcuts at once.
+- **Shortcut rule:** compare the original model with each treatment on identical held-out rows and seeds, and take the per-seed difference in raw-row recall at the primary false-positive rate. A family's result is shortcut-dependent only if the mean recall drop is at least 0.10 and the 95% confidence interval of that mean lies entirely above zero, on the side of a decrease. The rule applies the same way to every family and to the signature, TCP window, marker, context count and combined treatments. The total number of comparisons is reported, with no multiple-comparison correction. A family whose reference recall is below 0.10 cannot meet the rule and is reported as not testable, not as passing. This rule was set before the artifact-resistance run.
+- **Labels:** no label is changed because of a suspected error. Suspect traffic is examined in its original capture context. The 38,045 CICIDS2017 benign rows sent from victim to attacker, which may be attack replies, keep their labels and stay in the primary evaluation. A separate sensitivity run excludes them from training, validation and test, and the difference is reported.
+- **Final generalization claims:** no final generalization claim comes from data used to select a model or threshold, which includes every Config A and artifact-resistance result. Before such a claim, reserve an untouched evaluation set or adopt a nested evaluation protocol, so that model and threshold selection have no access to the final set.
 - **Cross-dataset:** train on one dataset, test on the other using shared features only.
 - **Prevalence:** report PR-AUC and precision at realistic benign prevalence, not only on balanced sets.
 - **Fixed baselines:** re-evaluate every checkpoint against frozen reference opponents to detect overfitting to the current attacker.
@@ -125,7 +128,7 @@ The GAN is postponed, not abandoned. A generator is worth adding only if it impr
 
 The work runs in five phases; each ends in a measured gate before the next begins. Dates are open until the available weeks and weekly hours are known.
 
-1. **Foundation and baseline:** environment, data pipeline, Config A. Gate: Config A measured on held-out families, and its dependence on dataset shortcuts reported.
+1. **Foundation and baseline:** environment, data pipeline, Config A. Gate: Config A measured on held-out families, and the artifact audit complete, with its dependence on dataset shortcuts reported.
 2. **Fixed adversarial scenarios:** realization layer, scripted attacker, Config B. Gate: Config B measured against A.
 3. **Co-training:** RL attacker, historical league, Config C. Gate: C compared with A and B on held-out families.
 4. **Opponent modeling:** prediction models, Configs D and E. Gate: D and E compared with C.
