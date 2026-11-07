@@ -1,0 +1,32 @@
+# Fast end-to-end check on generated data. Its numbers say nothing about real traffic.
+datasets:
+  - kind: synthetic
+    name: synthetic_a
+    seed: 11
+  - kind: synthetic
+    name: synthetic_b
+    seed: 12
+
+cross_dataset: true
+seeds: [0, 1, 2]
+val_fraction: 0.2
+test_fraction: 0.2
+max_train_per_family: 5000
+min_family_count: 100
+target_fprs: [0.01, 0.001]
+attack_prevalences: [0.01, 0.001]
+
+rf:
+  n_estimators: 30
+  max_depth: 12
+  min_samples_leaf: 2
+  n_jobs: 2
+
+autoencoder:
+  hidden: [32]
+  latent: 8
+  epochs: 8
+  batch_size: 256
+  learning_rate: 0.001
+  patience: 3
+  device: cpu

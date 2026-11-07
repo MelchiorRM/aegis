@@ -1,0 +1,39 @@
+# Aegis v2, Config A: static RF + AE baseline on the real datasets.
+# Use a machine with more than 12 GB of RAM. Full runs normally use the notebook, and a test
+# checks that its experiment settings match this file. Only n_jobs and device may differ.
+datasets:
+  - kind: cicids2017
+    path: data/cicids2017
+    # A port identifies the service, so it can stand in for the attack family.
+    drop_columns: ["Destination Port"]
+  - kind: unsw_nb15
+    path: data/unsw_nb15
+
+# The roadmap places cross-dataset tests in phase 5. Enabling them later adds folds to the
+# same output folder.
+cross_dataset: false
+seeds: [0, 1, 2, 3, 4]
+val_fraction: 0.2
+test_fraction: 0.2
+max_train_per_family: 100000
+min_family_count: 200
+
+# The first value of each list is the primary operating point.
+target_fprs: [0.01, 0.001]
+# Assumed attack share of live traffic; these are not measured values.
+attack_prevalences: [0.01, 0.001]
+
+rf:
+  n_estimators: 100
+  max_depth: 20
+  min_samples_leaf: 2
+  n_jobs: 4
+
+autoencoder:
+  hidden: [64, 32]
+  latent: 16
+  epochs: 30
+  batch_size: 1024
+  learning_rate: 0.001
+  patience: 4
+  device: cpu
