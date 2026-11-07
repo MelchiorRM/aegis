@@ -71,6 +71,51 @@ class TailCalibrator:
         return rarity + beyond
 
 
+def fit_forest(config: RandomForestConfig, seed: int, X: np.ndarray, y: np.ndarray) -> RandomForestClassifier:
+    return RandomForestClassifier(
+        n_estimators=config.n_estimators,
+        max_depth=config.max_depth,
+        min_samples_leaf=config.min_samples_leaf,
+        n_jobs=config.n_jobs,
+        class_weight="balanced_subsample",  # Used instead of SMOTE.
+        random_state=seed,
+    ).fit(X, y)
+
+
+def forest_log_odds(forest: RandomForestClassifier, X: np.ndarray) -> np.ndarray:
+    probability = forest.predict_proba(X)[:, list(forest.classes_).index(1)]
+    clipped = np.clip(probability, 1e-6, 1 - 1e-6)
+    return np.log(clipped / (1 - clipped))
+
+
+class RandomForestBaseline:
+    """The Config A baseline score: the forest alone, with no autoencoder to fit."""
+
+    def __init__(self, rf: RandomForestConfig, seed: int) -> None:
+        self.rf_config = rf
+        self.seed = seed
+        self.val_benign_scores = np.empty(0)
+
+    def fit(
+        self,
+        X_train: pd.DataFrame,
+        y_train: np.ndarray,
+        X_val_benign: pd.DataFrame,
+        numeric: Sequence[str],
+        categorical: Sequence[str] = (),
+    ) -> "RandomForestBaseline":
+        if len(np.unique(y_train)) != 2:
+            raise ValueError("Training data must contain both benign and attack rows")
+        self.preprocessor = build_preprocessor(numeric, categorical).fit(X_train)
+        train = self.preprocessor.transform(X_train).astype(np.float32)
+        self.forest = fit_forest(self.rf_config, self.seed, train, y_train)
+        self.val_benign_scores = self.scores(X_val_benign)
+        return self
+
+    def scores(self, X: pd.DataFrame) -> np.ndarray:
+        return forest_log_odds(self.forest, self.preprocessor.transform(X).astype(np.float32))
+
+
 class RFAEBaseline:
     """Combine a supervised score with an anomaly score.
 
@@ -104,14 +149,7 @@ class RFAEBaseline:
         train = self.preprocessor.transform(X_train).astype(np.float32)
         val = self.preprocessor.transform(X_val).astype(np.float32)
 
-        self.forest = RandomForestClassifier(
-            n_estimators=self.rf_config.n_estimators,
-            max_depth=self.rf_config.max_depth,
-            min_samples_leaf=self.rf_config.min_samples_leaf,
-            n_jobs=self.rf_config.n_jobs,
-            class_weight="balanced_subsample",  # Used instead of SMOTE.
-            random_state=self.seed,
-        ).fit(train, y_train)
+        self.forest = fit_forest(self.rf_config, self.seed, train, y_train)
 
         val_benign = val[y_val == 0]
         self.autoencoder = AutoencoderScorer(self.ae_config, self.seed).fit(
@@ -125,9 +163,7 @@ class RFAEBaseline:
         return self
 
     def _raw_scores(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        probability = self.forest.predict_proba(X)[:, list(self.forest.classes_).index(1)]
-        clipped = np.clip(probability, 1e-6, 1 - 1e-6)
-        rf = np.log(clipped / (1 - clipped))
+        rf = forest_log_odds(self.forest, X)
         ae = np.log(self.autoencoder.reconstruction_error(X) + 1e-12)
         return rf, ae
 

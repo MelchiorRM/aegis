@@ -56,7 +56,8 @@ def embedded_source_cell():
 INTRO = """\
 # Aegis v2, Phase 1: Config A baseline
 
-This notebook measures the static Random Forest + autoencoder defender on held-out attack
+This notebook measures the static Random Forest baseline, with autoencoder and fused scores
+for comparison, on held-out attack
 families. Phase 1 closes when that measurement exists for every eligible family, whatever
 the score is. A weak or null result still counts.
 
@@ -277,13 +278,15 @@ print('These p-values are not corrected for testing many families, scorers and F
       'value below 0.05 is not by itself a claim.')
 
 primary_fpr = config.target_fprs[0]
+# The fused and autoencoder scores stay in the tables for comparison.
+BASELINE_SCORER = 'rf'
 degradation = pd.read_csv(f'{OUTPUT_DIR}/degradation.csv')
 summary = pd.read_csv(f'{OUTPUT_DIR}/summary.csv')
 
 test_rows = (results[results['fold'].str.startswith('holdout:')]
              .groupby(['dataset', 'eval_family'])['n_attack'].first().rename('test_attack_rows'))
 
-for scorer in ('fused', 'rf', 'ae'):
+for scorer in (BASELINE_SCORER, 'fused', 'ae'):
     table = degradation[(degradation['scorer'] == scorer) & (degradation['target_fpr'] == primary_fpr)]
     table = table.join(test_rows, on=['dataset', 'eval_family'])
     print(f'Recall on the same test flows, seen vs held out: {scorer} scorer, target FPR {primary_fpr:g}')
@@ -297,8 +300,8 @@ import matplotlib.pyplot as plt
 SEEN, HELD_OUT = '#2a78d6', '#eb6834'  # Validated categorical slots 1 and 2.
 SURFACE, INK, MUTED, GRID = '#fcfcfb', '#0b0b0b', '#52514e', '#e4e3df'
 
-view = degradation[(degradation['scorer'] == 'fused') & (degradation['target_fpr'] == primary_fpr)]
-intervals = summary[(summary['scorer'] == 'fused') & (summary['target_fpr'] == primary_fpr)
+view = degradation[(degradation['scorer'] == BASELINE_SCORER) & (degradation['target_fpr'] == primary_fpr)]
+intervals = summary[(summary['scorer'] == BASELINE_SCORER) & (summary['target_fpr'] == primary_fpr)
                     & summary['fold'].str.startswith('holdout:')]
 names = list(view['dataset'].unique())
 fig, axes = plt.subplots(len(names), 1, squeeze=False, facecolor=SURFACE,
@@ -327,7 +330,7 @@ for axis, name in zip(axes[:, 0], names):
     for side in axis.spines.values():
         side.set_visible(False)
 
-axes[-1, 0].set_xlabel(f'Recall on the same test flows, fused score, target FPR {primary_fpr:g}', color=MUTED)
+axes[-1, 0].set_xlabel(f'Recall on the same test flows, {BASELINE_SCORER} score, target FPR {primary_fpr:g}', color=MUTED)
 axes[0, 0].legend(loc='lower center', bbox_to_anchor=(0.5, 1.12), ncols=2, frameon=False, labelcolor=INK)
 fig.tight_layout()
 fig.savefig(f'{OUTPUT_DIR}/seen_vs_heldout_recall.png', dpi=160, facecolor=SURFACE, bbox_inches='tight')
@@ -337,7 +340,7 @@ plt.show()
 CALIBRATION = """\
 # Recall only means something at the false-positive rate actually reached. A realized FPR far
 # from the target means the threshold drifted, and recall_at_oracle_fpr shows the ranking alone.
-holdout = summary[summary['fold'].str.startswith('holdout:') & (summary['scorer'] == 'fused')]
+holdout = summary[summary['fold'].str.startswith('holdout:') & (summary['scorer'] == BASELINE_SCORER)]
 columns = ['dataset', 'eval_family', 'target_fpr', 'realized_fpr_mean', 'recall_mean', 'recall_at_oracle_fpr_mean']
 columns += [c for c in holdout.columns if c.startswith(('pr_auc_prev_', 'precision_prev_')) and c.endswith('_mean')]
 display(holdout[columns].round(4))
