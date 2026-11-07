@@ -20,19 +20,25 @@ base = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(base)
 
 INTRO = """\
-# Aegis v2: artifact-resistant evaluation
+# Aegis v2: artifact-resistance and sensitivity audit
 
-Tests whether Random Forest recall on held-out attack families survives the removal of dataset
-shortcuts. Every treatment refits the baseline on the same folds. No label is changed.
+This run audits the Random Forest baseline. **It is not an unbiased estimate of final
+generalization:** the baseline was chosen using these same test results, and no untouched evaluation
+set is involved. Phase 1 stays open until this audit is reported.
+
+Every treatment refits the baseline on the same folds and is scored on identical held-out rows. Raw
+published rows give the primary recall, and deduplicated rows are a secondary sensitivity analysis.
+No label is changed.
 
 | Treatment | Question |
 | --- | --- |
 | `remove_matching_signatures` | Does the model rely on near-duplicates of the held-out family? |
-| Raw versus deduplicated, on `reference` | How sensitive is recall to duplicate handling? |
 | `no_tcp_window` | Does the model rely on host-specific TCP fingerprints? |
-| `neutralize_missing_markers`, `missingness_only` | Is missingness itself a shortcut? |
+| `neutralize_missing_markers`, `missingness_only` | Is a missing-value marker itself a shortcut? |
+| `service_marker_only` | With the reference and column removal, what does UNSW-NB15 take from `service`? |
 | `no_context_counts` | How much does UNSW-NB15 depend on its `ct_*` counts? |
 | `all_controls` | What remains with signatures, TCP windows and markers all controlled? |
+| `exclude_suspect_benign` | Do the possibly mislabeled CICIDS2017 benign rows change the result? |
 
 **Before you start:** use the same data folder as the Config A run. Results go to a new folder,
 and this notebook only reads the earlier Config A folder.
@@ -107,32 +113,68 @@ TABLES = """\
 pd.set_option('display.max_rows', 300, 'display.width', 200, 'display.max_columns', 40)
 primary_fpr = config.target_fprs[0]
 main = results[results['target_fpr'] == primary_fpr]
+reference = main[main['treatment'] == 'reference']
 effects = pd.read_csv(f'{OUTPUT_DIR}/treatment_effects.csv')
-order = ['reference', 'remove_matching_signatures', 'no_tcp_window', 'neutralize_missing_markers',
-         'no_context_counts', 'all_controls', 'missingness_only']
+effects = effects[effects['target_fpr'] == primary_fpr]
+with open(f'{OUTPUT_DIR}/shortcut_rule.json', encoding='utf-8') as handle:
+    rule = json.load(handle)
+EFFECT_COLUMNS = ['dataset', 'family', 'treatment', 'raw_recall_reference', 'raw_recall_treated', 'mean_diff',
+                  'ci_low', 'ci_high', 'rule_testable', 'shortcut_dependent']
 
-for metric in ('recall', 'auc'):
-    table = main.pivot_table(index=['dataset', 'family'], columns='treatment', values=metric)
-    display(table[[c for c in order if c in table.columns]].round(3))
 
-print('Raw versus deduplicated evaluation, reference treatment')
-raw = main[main['treatment'] == 'reference'].groupby(['dataset', 'family'])[
-    ['recall', 'raw_recall', 'raw_recall_at_oracle_fpr', 'raw_fpr', 'raw_distinct_recall',
-     'raw_conflicting_share', 'raw_attack_rows']].mean()
-display(raw.round(3))
+def show_effects(title, treatments, family=None):
+    # mean_diff is reference minus treated raw recall, so a negative value is recall gained.
+    print(title)
+    table = effects[effects['treatment'].isin(treatments)]
+    if family is not None:
+        table = table[table['family'] == family]
+    display(table[EFFECT_COLUMNS].round(3))
 
+
+print('This is a sensitivity audit, not an unbiased generalization estimate.')
+show_effects('1. Web attack recall after signature removal', ['remove_matching_signatures'], 'web_attack')
+
+print('2. PortScan on raw published rows, reference treatment')
+display(reference[reference['family'] == 'portscan'].groupby('dataset')[
+    ['raw_recall', 'recall', 'raw_recall_at_oracle_fpr', 'raw_fpr', 'raw_distinct_recall',
+     'raw_conflicting_share', 'raw_attack_rows']].mean().round(3))
+
+show_effects('3. Sensitivity to TCP window features', ['no_tcp_window'])
+show_effects('4. Signal through markers (missingness_only sees nothing else)',
+             ['neutralize_missing_markers', 'missingness_only'])
+print('4b. UNSW-NB15 service: kept with its catch-all value, removed, or reduced to one flag')
+service = main[(main['dataset'] == 'unsw_nb15')
+               & main['treatment'].isin(['reference', 'neutralize_missing_markers', 'service_marker_only'])]
+display(service.pivot_table(index='family', columns='treatment', values='raw_recall').round(3))
+show_effects('5. Removing ct_* context counts', ['no_context_counts'])
+show_effects('6. all_controls across unseen attack families', ['all_controls'])
+
+print('7. Possibly mislabeled benign rows: original labels are primary, and this run excludes them')
+print('Attack rows are identical to the reference. Benign rows differ by design, so raw_fpr is shown too.')
+suspect = effects[effects['treatment'] == 'exclude_suspect_benign']
+display(suspect[['dataset', 'family', 'raw_recall_reference', 'raw_recall_treated', 'mean_diff', 'ci_low', 'ci_high']].round(3))
+display(main[main['treatment'].isin(['reference', 'exclude_suspect_benign'])
+             & (main['dataset'] == 'cicids2017')].pivot_table(
+    index='family', columns='treatment', values=['raw_fpr', 'raw_benign_rows']).round(4))
+
+print('8. Secondary: raw versus deduplicated recall, reference treatment')
+display(reference.groupby(['dataset', 'family'])[
+    ['raw_recall', 'recall', 'raw_recall_at_oracle_fpr', 'raw_fpr', 'raw_conflicting_share', 'raw_attack_rows']
+].mean().round(3))
 print('Recall by whether a test flow matches a training attack apart from timing, reference treatment')
-display(main[main['treatment'] == 'reference'].groupby(['dataset', 'family'])[
+display(reference.groupby(['dataset', 'family'])[
     ['signature_matched_rows', 'n_attack', 'recall_signature_matched', 'recall_signature_unmatched']].mean().round(3))
 
-# The rule set in the v2 specification before this run.
-flagged = effects[(effects['target_fpr'] == primary_fpr) & (effects['treatment'] != 'missingness_only')
-                  & (effects['mean_diff'] >= 0.10) & (effects['ci_low'] > 0)]
-print('Shortcut-dependent results: recall falls by at least 0.10 and the paired interval excludes zero')
-display(flagged[['dataset', 'family', 'treatment', 'recall_reference', 'recall_treated', 'mean_diff',
-                 'ci_low', 'ci_high', 'cohen_dz']].round(3))
-print('With five seeds the paired test cannot reach p < 0.05, and values are not corrected for '
-      'testing many families and treatments. Read the intervals and effect sizes.')
+print('Shortcut-dependent results: mean paired raw-recall drop of at least 0.10, with the 95% interval above zero')
+display(effects[effects['shortcut_dependent']][EFFECT_COLUMNS].round(3))
+print(f"Comparisons under the rule: {rule['n_comparisons']} {rule['n_comparisons_by_dataset']}, with no "
+      f"multiple-comparison correction. {rule['n_shortcut_dependent']} flagged.")
+print(f"{rule['n_not_testable']} comparisons cannot trigger the rule, because reference recall is already under 0.10:")
+display(effects[(effects['role'] == 'rule') & ~effects['rule_testable']][['dataset', 'family', 'treatment', 'raw_recall_reference']].round(3))
+print('Flagged on deduplicated rows instead (secondary):')
+display(effects[effects['dedup_shortcut_dependent']][
+    ['dataset', 'family', 'treatment', 'recall_reference', 'recall_treated', 'dedup_mean_diff', 'dedup_ci_low', 'dedup_ci_high']].round(3))
+print('With five seeds the paired test cannot reach p < 0.05. Read the intervals and effect sizes.')
 """
 
 PACKAGE = """\
@@ -140,7 +182,7 @@ import zipfile
 
 archive = f'{OUTPUT_DIR}/aegis_artifact_results.zip'
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
-    for name in ('manifest.json', 'results.csv', 'treatment_effects.csv'):
+    for name in ('manifest.json', 'results.csv', 'treatment_effects.csv', 'shortcut_rule.json'):
         bundle.write(f'{OUTPUT_DIR}/{name}', name)
 print('Return this file with the executed notebook:', archive)
 """

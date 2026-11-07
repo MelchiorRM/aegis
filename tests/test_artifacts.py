@@ -17,12 +17,16 @@ from aegis.experiments.artifacts import (
     Treatment,
     build_raw_rows,
     evaluate_raw,
+    meets_shortcut_rule,
     missingness_frame,
+    rule_report,
     run,
     signatures,
+    summarize_treatments,
     training_rows,
     treated_features,
     treatments_for,
+    without_suspect_benign,
 )
 from aegis.models.baseline import RandomForestBaseline
 
@@ -90,6 +94,79 @@ def test_unsw_marker_removes_the_service_column():
     assert plan["no_context_counts"].drop == ("ct_srv_src",)
     assert plan["all_controls"].drop == ("swin", "service")
     assert missingness_frame(ds).iloc[:, 0].tolist() == [1.0, 0.0, 1.0]
+    flagged = treated_features(ds, plan["service_marker_only"], np.arange(3), missingness_frame(ds))
+    assert "service" not in flagged and flagged["service_marker"].tolist() == [1.0, 0.0, 1.0]
+
+
+def test_shortcut_rule_needs_the_drop_and_an_interval_on_the_side_of_a_decrease():
+    assert meets_shortcut_rule(0.10, 0.01)
+    assert not meets_shortcut_rule(0.09, 0.05)  # Too small.
+    assert not meets_shortcut_rule(0.30, 0.0)  # The interval reaches zero.
+    assert not meets_shortcut_rule(-0.30, -0.40)  # Recall rose, however clearly.
+    assert not meets_shortcut_rule(float("nan"), float("nan"))
+
+
+def effect_rows(treatment, reference, treated, benign_hash="b", family="f"):
+    rows = []
+    for seed, (before, after) in enumerate(zip(reference, treated)):
+        for name, raw in ((REFERENCE, before), (treatment, after)):
+            rows.append(
+                {"dataset": "d", "family": family, "target_fpr": 0.01, "seed": seed, "treatment": name,
+                 "raw_recall": raw, "recall": 0.5, "auc": 0.9, "attack_rows_hash": "a",
+                 "benign_rows_hash": benign_hash if name == treatment else "b"}
+            )
+    return pd.DataFrame(rows)
+
+
+def test_rule_uses_raw_recall_and_reports_every_comparison():
+    drop = effect_rows("no_tcp_window", [0.8, 0.82, 0.79], [0.5, 0.52, 0.51])
+    floor = effect_rows("all_controls", [0.02, 0.01, 0.03], [0.0, 0.0, 0.0], family="g")
+    gain = effect_rows("no_context_counts", [0.4, 0.4, 0.4], [0.9, 0.95, 0.92])
+    probe = effect_rows("missingness_only", [0.8, 0.8, 0.8], [0.0, 0.0, 0.0])
+    results = pd.concat([drop, floor, gain[gain.treatment != REFERENCE], probe[probe.treatment != REFERENCE]])
+    effects = summarize_treatments(results, 100, 0.01).set_index("treatment")
+    assert effects.loc["no_tcp_window", "shortcut_dependent"]
+    assert not effects.loc["no_tcp_window", "dedup_shortcut_dependent"]  # Deduplicated recall did not move.
+    assert not effects.loc["no_context_counts", "shortcut_dependent"]
+    assert not effects.loc["missingness_only", "shortcut_dependent"]  # A probe, outside the rule.
+    report = rule_report(effects.reset_index(), 0.01)
+    assert report["n_comparisons"] == 3 and report["n_shortcut_dependent"] == 1
+    assert report["n_not_testable"] == 1 and not effects.loc["all_controls", "rule_testable"]
+    assert report["treatments_outside_the_rule"] == ["missingness_only"]
+    assert "not an unbiased" in report["evaluation_role"]
+
+
+def test_rule_applies_only_at_the_primary_fpr():
+    results = effect_rows("no_tcp_window", [0.8, 0.82, 0.79], [0.5, 0.52, 0.51])
+    effects = summarize_treatments(results, 100, primary_fpr=0.001)
+    assert not effects["shortcut_dependent"].any()
+    assert rule_report(effects, 0.001)["n_comparisons"] == 0
+
+
+def test_comparison_on_different_rows_is_refused():
+    results = effect_rows("no_tcp_window", [0.8, 0.8], [0.5, 0.5], benign_hash="other")
+    with pytest.raises(ValueError, match="not evaluated on the reference rows"):
+        summarize_treatments(results, 100, 0.01)
+    allowed = effect_rows("exclude_suspect_benign", [0.8, 0.8], [0.5, 0.5], benign_hash="other")
+    assert summarize_treatments(allowed, 100, 0.01).loc[0, "role"] == "label_sensitivity"
+
+
+def test_excluding_suspect_rows_leaves_attack_rows_alone():
+    fold = Fold("holdout:web", np.array([0, 2, 3]), np.array([4]), np.array([1, 5]), "web")
+    suspect = np.array([True, False, False, False, True, True])
+    trimmed = without_suspect_benign(fold, suspect)
+    assert trimmed.train.tolist() == [2, 3] and trimmed.val.tolist() == [] and trimmed.test.tolist() == [1]
+
+
+def test_suspect_list_skips_other_data_and_refuses_a_mismatched_copy():
+    from aegis.data import suspect_benign as module
+
+    assert module.suspect_benign_mask(cicids_like()) is None  # The row count differs.
+    columns = [*module._CHECK_COLUMNS]
+    X = pd.DataFrame(np.zeros((module.CLEANED_ROWS, len(columns)), dtype=np.float32), columns=columns)
+    family = np.full(module.CLEANED_ROWS, "benign", dtype=object)
+    with pytest.raises(ValueError, match="do not match"):
+        module.suspect_benign_mask(Dataset("cicids2017", X, family))
 
 
 def test_raw_rows_restore_repeats_and_flag_conflicts():
@@ -133,14 +210,39 @@ def test_run_writes_only_to_its_folder_and_resumes(tmp_path):
     assert (other / "results.csv").read_text(encoding="utf-8") == "kept"
     assert set(results["treatment"]) == {REFERENCE, "remove_matching_signatures", "all_controls"}
     reference = results[results["treatment"] == REFERENCE]
-    assert reference["raw_recall"].notna().all()
-    assert results[results["treatment"] != REFERENCE]["raw_recall"].isna().all()
+    assert results["raw_recall"].notna().all()  # The primary metric exists for every treatment.
+    assert results.groupby(["seed", "family"])["attack_rows_hash"].nunique().eq(1).all()
+    rule = json.loads((out / "shortcut_rule.json").read_text(encoding="utf-8"))
+    assert rule["n_comparisons"] == reference["family"].nunique() * 2
+    assert rule["primary_metric"] == "raw_recall"
 
     lines = []
     again = run(small_config(), out, log=lines.append)
     assert not [line for line in lines if line.startswith("[")]  # Every fold was already done.
     pd.testing.assert_frame_equal(results, again)
     assert json.loads((out / "manifest.json").read_text(encoding="utf-8"))["identity"]["extra"]["experiment"] == "artifact_resistance"
+
+
+def test_label_sensitivity_excludes_rows_only_in_its_own_treatment(tmp_path, monkeypatch):
+    def mark(ds):
+        mask = np.zeros(len(ds.X), dtype=bool)
+        mask[np.flatnonzero(ds.family.astype(str) == "benign")[:200]] = True
+        return mask
+
+    monkeypatch.setattr("aegis.experiments.artifacts.suspect_benign_mask", mark)
+    out = tmp_path / "artifacts"
+    results = run(small_config(), out, log=lambda message: None)
+    effects = pd.read_csv(out / "treatment_effects.csv")
+    assert effects.loc[effects["treatment"] == "exclude_suspect_benign", "role"].eq("label_sensitivity").all()
+    rows = results.set_index(["treatment", "family", "target_fpr"]).sort_index()
+    family = results["family"].iloc[0]
+    baseline, excluded = rows.loc[(REFERENCE, family, 0.01)], rows.loc[("exclude_suspect_benign", family, 0.01)]
+    assert excluded["n_benign"] < baseline["n_benign"]
+    assert excluded["raw_benign_rows"] < baseline["raw_benign_rows"]
+    assert excluded["n_attack"] == baseline["n_attack"] and excluded["raw_attack_rows"] == baseline["raw_attack_rows"]
+    assert excluded["attack_rows_hash"] == baseline["attack_rows_hash"]
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["identity"]["extra"]["suspect_benign_excluded_in_sensitivity_only"]["synthetic_a"]["cleaned_rows"] == 200
 
 
 def _load(name: str, path: Path):
@@ -181,9 +283,10 @@ def test_notebook_uses_a_new_folder_and_runs_on_small_csv_files(tmp_path, monkey
     assert "No Config A results found" in text
     assert "Shortcut-dependent results" in text
     with zipfile.ZipFile(output / "aegis_artifact_results.zip") as bundle:
-        assert set(bundle.namelist()) == {"manifest.json", "results.csv", "treatment_effects.csv"}
+        assert set(bundle.namelist()) == {"manifest.json", "results.csv", "treatment_effects.csv", "shortcut_rule.json"}
     results = pd.read_csv(output / "results.csv")
-    assert {"neutralize_missing_markers", "missingness_only"} <= set(results["treatment"])
+    assert {"neutralize_missing_markers", "missingness_only", "service_marker_only"} <= set(results["treatment"])
+    assert "not an unbiased generalization estimate" in text
     assert set(results["seed"]) == {0, 1}
 
 
