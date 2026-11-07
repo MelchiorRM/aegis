@@ -14,6 +14,16 @@ It does not claim to invent multi-agent cybersecurity, adaptive attackers or int
 | Evaluation | Random splits; static and rule-based baselines | Leakage-controlled splits, held-out attack families, cost and statistical controls |
 | Scope | Broad system | One focused hypothesis, ablated |
 
+## Research foundation
+
+The work rests on five steps, in this order. Each depends on the one before it.
+
+1. **Leakage-free evaluation:** attack families are excluded from training and validation.
+2. **Artifact-resistant evaluation:** investigate duplicates, host fingerprints, feature shortcuts and mislabeled traffic, to establish whether apparent generalization is genuine or caused by dataset-specific shortcuts.
+3. **Robust baseline:** establish a reliable Random Forest baseline using controlled preprocessing.
+4. **Adaptive adversarial training:** investigate whether co-training improves performance on genuinely unfamiliar attacks.
+5. **Opponent modeling:** investigate whether predicting an adaptive opponent provides benefits beyond historical opponent pools.
+
 ## Limitations of the baseline paper and the Aegis v2 fix
 
 The paper (Agrawal et al., *Scientific Reports* 16:11673, 2026) reports a DQN attacker, an RF + autoencoder defender and fixed rule-based responses in CyDER 2.0. Its evaluation leaves these gaps, each addressed by a specific design choice here.
@@ -26,7 +36,7 @@ The paper (Agrawal et al., *Scientific Reports* 16:11673, 2026) reports a DQN at
 | 4 | SMOTE oversampling is listed before the train/test split, so leakage is possible | Split first, then resample or use class weights |
 | 5 | Balanced \~50k-sample test set; real traffic is mostly benign | Evaluate PR-AUC and precision at realistic benign prevalence |
 | 6 | "Hold-out" is a random split; no unseen attack families | Leave-one-attack-family-out and cross-dataset tests |
-| 7 | Baselines are a static range and a hand-written rule-based MAS | Paper-inspired RF + AE baseline plus an RL baseline from an existing environment |
+| 7 | Baselines are a static range and a hand-written rule-based MAS | Paper-inspired RF baseline, with RF + AE measured for comparison, plus an RL baseline from an existing environment |
 | 8 | Cross-paper comparison table; "25+ agents" claimed, but runs use 2 attackers and 3 defenders per network | No cross-paper numeric comparisons; claims limited to what is run |
 | 9 | Test counts, seeds and confidence intervals not reported | 5-10 seeds, bootstrap confidence intervals, paired tests for every claim |
 | 10 | Response actions (quarantine, IP blocks) carry no cost, so false positives look free | Defender reward includes false-alarm, disruption and response costs |
@@ -52,13 +62,13 @@ Five configurations isolate the effect of adversarial training, the historical l
 
 | Config | Defender | Attacker training | Opponent modeling | Isolates |
 | --- | --- | --- | --- | --- |
-| A | Static RF + AE | None | No | Baseline |
-| B | Static RF + AE | Fixed adversarial scenarios | No | Value of adversarial data alone |
+| A | Static RF | None | No | Baseline |
+| B | Static RF | Fixed adversarial scenarios | No | Value of adversarial data alone |
 | C | Adaptive defender | RL + historical league | No | Value of co-training (RQ1) |
 | D | Adaptive defender | RL + historical league | Yes | Value of opponent modeling (RQ2) |
 | E | Adaptive defender | RL, no historical league | Yes | Opponent modeling without the league |
 
-Configuration A is a paper-inspired baseline, not a replication. Exact replication is claimed only if the paper's preprocessing, model configuration and evaluation protocol can be reproduced; the paper does not release them, so deviations are documented.
+Configuration A originally used RF + AE. It was changed to the RF score after the Config A run, because RF was the strongest of the RF, AE and fused scores on held-out families; the choice used test results, so this must be disclosed. Configuration A is a paper-inspired baseline, not a replication. Exact replication is claimed only if the paper's preprocessing, model configuration and evaluation protocol can be reproduced; the paper does not release them, so deviations are documented.
 
 ## Metrics and defender reward
 
@@ -87,6 +97,14 @@ The protocol exists to stop two agents from becoming good only at playing each o
 - **Three environments:** training (both agents learn), validation (tune models and strategies), holdout (unseen scenarios, touched once at the end).
 - **Leakage control:** split before any resampling; fit scalers and encoders on training data only; use class weights instead of SMOTE where possible.
 - **Unseen families:** leave-one-attack-family-out on CICIDS2017 and UNSW-NB15; attack families in the holdout are never seen by the defender or the attacker's generator.
+- **Artifact resistance:** a held-out result counts as generalization only after it is tested against dataset shortcuts. Each treatment refits the baseline on the same folds, in a separate output folder that preserves earlier results:
+  - **Near-duplicates:** remove training attack rows that match the held-out family apart from timing.
+  - **Duplicate handling:** compare recall on deduplicated rows with recall on all published rows.
+  - **Host fingerprints:** remove TCP window features.
+  - **Missingness:** neutralize missing-value markers, and test a model that sees only those markers.
+  - **Combined:** apply the near-duplicate, TCP window and marker controls together.
+- **Shortcut rule:** at the primary false-positive rate, a family's result is shortcut-dependent if a treatment lowers its recall by at least 0.10 and the paired interval excludes zero. This rule was set before the artifact-resistance run.
+- **Labels:** no label is changed because of a suspected error. Suspect traffic is examined in its original capture context, and any later change is reported as a separate sensitivity analysis.
 - **Cross-dataset:** train on one dataset, test on the other using shared features only.
 - **Prevalence:** report PR-AUC and precision at realistic benign prevalence, not only on balanced sets.
 - **Fixed baselines:** re-evaluate every checkpoint against frozen reference opponents to detect overfitting to the current attacker.
@@ -107,7 +125,7 @@ The GAN is postponed, not abandoned. A generator is worth adding only if it impr
 
 The work runs in five phases; each ends in a measured gate before the next begins. Dates are open until the available weeks and weekly hours are known.
 
-1. **Foundation and baseline:** environment, data pipeline, Config A. Gate: Config A measured on held-out families.
+1. **Foundation and baseline:** environment, data pipeline, Config A. Gate: Config A measured on held-out families, and its dependence on dataset shortcuts reported.
 2. **Fixed adversarial scenarios:** realization layer, scripted attacker, Config B. Gate: Config B measured against A.
 3. **Co-training:** RL attacker, historical league, Config C. Gate: C compared with A and B on held-out families.
 4. **Opponent modeling:** prediction models, Configs D and E. Gate: D and E compared with C.
@@ -120,6 +138,7 @@ Each gate is a measurement, not a date: a phase closes only when its configurati
 | Building a simulator consumes the schedule | Reuse an existing environment (CybORG, NASim or CyberBattleSim); pick one as primary, others for external validation |
 | Co-trained agents cycle and forget old attacks | Train against a league of historical opponents; evaluate against frozen baselines |
 | Simulated actions do not resemble real traffic | Traffic realization layer with validity constraints; check realism before training |
+| Apparent generalization comes from dataset shortcuts | Artifact-resistance treatments and the shortcut rule; report results that fail it as shortcut-dependent |
 | Reward weights drive the result | Justify weights; run sensitivity analysis |
 | Opponent modeling adds nothing | Configurations D and E isolate it; report a null result honestly |
 | Scope creep | Generative model deferred until RQ1 and RQ2 are answered |

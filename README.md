@@ -4,9 +4,18 @@ Aegis is a research project on adaptive cyber defense. It asks one question: doe
 co-training a defender against adaptive attackers, combined with opponent modeling, help
 it detect attack families it has never seen?
 
-> **Status: early-stage research.** The baseline defender (Config A) is implemented and
-> tested, but it has only been run on generated data. There are no results on real traffic
-> yet, so this repository makes no performance claims.
+> **Status: early-stage research.** The baseline defender (Config A) has been measured on
+> CICIDS2017 and UNSW-NB15 held-out families. An audit found that some of those scores depend
+> on dataset artifacts, so this repository makes no performance claims.
+
+## Research foundation
+
+1. **Leakage-free evaluation:** attack families are excluded from training and validation.
+2. **Artifact-resistant evaluation:** investigate duplicates, host fingerprints, feature shortcuts
+   and mislabeled traffic, to establish whether apparent generalization is genuine.
+3. **Robust baseline:** a reliable Random Forest baseline with controlled preprocessing.
+4. **Adaptive adversarial training:** does co-training help on genuinely unfamiliar attacks?
+5. **Opponent modeling:** does predicting an adaptive opponent add to historical opponent pools?
 
 ## Research questions
 
@@ -26,21 +35,23 @@ Five configurations separate the effect of each component:
 
 | Config | Defender | Attacker training | Opponent modeling | Isolates |
 | --- | --- | --- | --- | --- |
-| A | Static Random Forest + autoencoder | None | No | Baseline |
-| B | Static Random Forest + autoencoder | Fixed adversarial scenarios | No | Adversarial data alone |
+| A | Static Random Forest | None | No | Baseline |
+| B | Static Random Forest | Fixed adversarial scenarios | No | Adversarial data alone |
 | C | Adaptive | RL + historical league | No | Co-training |
 | D | Adaptive | RL + historical league | Yes | Opponent modeling |
 | E | Adaptive | RL, no historical league | Yes | Opponent modeling without the league |
 
 Config A takes its model design from Agrawal et al. (*Scientific Reports* 16:11673, 2026).
 It is not a replication, because that paper does not release its preprocessing or model
-settings.
+settings. The autoencoder and fused scores are still measured for comparison, but the Random
+Forest score is the baseline: it was the strongest of the three on held-out families. That
+choice was made after seeing test results.
 
 ## Roadmap
 
 Each phase closes on a measurement, not a date.
 
-- [ ] **Phase 1, foundation and baseline:** code complete; waiting on Config A measurements on real held-out families
+- [ ] **Phase 1, foundation and baseline:** Config A measured on real held-out families; artifact-resistance run pending
 - [ ] **Phase 2, fixed adversarial scenarios:** traffic realization layer, scripted attacker, Config B
 - [ ] **Phase 3, co-training:** RL attacker, historical league, Config C
 - [ ] **Phase 4, opponent modeling:** prediction models, Configs D and E
@@ -52,6 +63,9 @@ Each phase closes on a measurement, not a date.
   and encoder are fit on training rows only. Class weights replace SMOTE.
 - **Unseen families:** each eligible attack family is removed from training and validation,
   then its recall is compared with a model that saw it, on the same test flows.
+- **Dataset shortcuts:** each treatment refits the baseline on the same folds, in its own output
+  folder: near-duplicates removed, TCP windows removed, missing-value markers neutralized, and
+  recall compared on raw and deduplicated rows. No label is changed.
 - **Thresholds:** set from validation benign traffic only, with the false-positive rate
   actually reached reported alongside.
 - **Realistic prevalence:** PR-AUC and precision are reweighted to assumed attack shares of
@@ -92,11 +106,14 @@ Datasets are not included. Download them from their publishers and place the CSV
 Full runs use [notebooks/config_a_baseline.ipynb](notebooks/config_a_baseline.ipynb), which
 embeds the package source and can run on Colab or Kaggle without a clone. Use a machine with
 more than 12 GB of RAM. Interrupted runs continue from the last finished fold.
+[notebooks/artifact_resistance.ipynb](notebooks/artifact_resistance.ipynb) runs the shortcut
+treatments the same way and writes to `results/config_a_artifacts`, leaving Config A results alone.
 
-After changing anything in `src/`, rebuild the notebook. A test fails if it is out of date:
+After changing anything in `src/`, rebuild both notebooks. A test fails if either is out of date:
 
 ```bash
 .venv/bin/python notebooks/build_notebook.py
+.venv/bin/python notebooks/build_artifact_notebook.py
 ```
 
 ## Repository layout
@@ -104,7 +121,7 @@ After changing anything in `src/`, rebuild the notebook. A test fails if it is o
 | Path | Contents |
 | --- | --- |
 | `src/aegis/data/` | Dataset loaders, cleaning and leakage-controlled splits |
-| `src/aegis/models/` | Random Forest + autoencoder defender |
+| `src/aegis/models/` | Random Forest baseline and autoencoder comparison scores |
 | `src/aegis/evaluation/` | Detection metrics and paired statistics |
 | `src/aegis/experiments/` | Resumable experiment runner |
 | `configs/` | Experiment settings |
