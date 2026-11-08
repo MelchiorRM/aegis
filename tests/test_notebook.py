@@ -23,24 +23,35 @@ def load_builder():
 
 
 def cicids_fixture(folder: Path, rng: np.random.Generator) -> None:
+    """Five day files shaped like the improved CICIDS2017 release, including some "Attempted" flows."""
     folder.mkdir(parents=True)
     columns = [
-        " Destination Port", " Flow Duration", " Total Fwd Packets", " Total Backward Packets",
-        "Total Length of Fwd Packets", " Total Length of Bwd Packets", " Fwd Packet Length Mean",
-        " Bwd Packet Length Mean", "Flow Bytes/s", " Fwd IAT Mean", " Bwd IAT Mean",
+        "Flow Duration", "Total Fwd Packet", "Total Bwd packets", "Total Length of Fwd Packet",
+        "Total Length of Bwd Packet", "Fwd Packet Length Mean", "Bwd Packet Length Mean", "Flow Bytes/s",
+        "Fwd IAT Mean", "Bwd IAT Mean",
     ]
-    labels = ["BENIGN"] * 1200 + ["DoS Hulk"] * 300 + ["PortScan"] * 300 + ["Heartbleed"] * 11
-    values = rng.lognormal(3.0, 0.5, size=(len(labels), len(columns)))
+    labels = (["BENIGN"] * 1200 + ["DoS Hulk"] * 300 + ["Portscan"] * 300 + ["Heartbleed"] * 11
+              + ["DoS Hulk - Attempted"] * 40)
     names = np.array(labels)
-    values[names == "DoS Hulk", 1:4] *= 40
-    values[names == "PortScan", 4:7] *= 40
+    values = rng.lognormal(3.0, 0.5, size=(len(labels), len(columns)))
+    values[names == "DoS Hulk", 0:3] *= 40
+    values[names == "Portscan", 3:6] *= 40
     frame = pd.DataFrame(values, columns=columns)
     frame["Flow Bytes/s"] = frame["Flow Bytes/s"].astype(object)
     frame.loc[0, "Flow Bytes/s"] = "Infinity"
-    frame[" Label"] = labels
+    frame.insert(0, "Timestamp", "2017-07-05 10:00:00.000000")
+    frame.insert(0, "Protocol", 6)
+    frame.insert(0, "Dst Port", rng.choice([80, 443, 22], len(frame)))
+    frame.insert(0, "Dst IP", "192.168.10.50")
+    frame.insert(0, "Src Port", rng.integers(1024, 65535, len(frame)))
+    frame.insert(0, "Src IP", "172.16.0.1")
+    frame.insert(0, "Flow ID", [f"flow-{i}" for i in range(len(frame))])
+    frame["Label"] = labels
+    frame["Attempted Category"] = np.where(np.char.endswith(names.astype(str), " - Attempted"), 0, -1)
     frame = frame.sample(frac=1.0, random_state=0).reset_index(drop=True)
-    for i, part in enumerate(np.array_split(np.arange(len(frame)), 8)):
-        frame.iloc[part].to_csv(folder / f"day{i}.pcap_ISCX.csv", index=False)
+    days = ("monday", "tuesday", "wednesday", "thursday", "friday")
+    for day, part in zip(days, np.array_split(np.arange(len(frame)), len(days))):
+        frame.iloc[part].to_csv(folder / f"{day}.csv", index=False)
 
 
 def unsw_fixture(folder: Path, rng: np.random.Generator) -> None:
@@ -77,7 +88,7 @@ def test_notebook_has_no_saved_outputs():
 
 def test_notebook_runs_top_to_bottom_on_small_csv_files(tmp_path, monkeypatch):
     rng = np.random.default_rng(0)
-    cicids_fixture(tmp_path / "data" / "CIC" / "MachineLearningCVE", rng)
+    cicids_fixture(tmp_path / "data" / "CNS2022" / "CICIDS2017", rng)
     unsw_fixture(tmp_path / "data" / "UNSW", rng)
     output = tmp_path / "output"
     monkeypatch.setenv("AEGIS_DATA_ROOT", str(tmp_path / "data"))
@@ -108,14 +119,14 @@ def test_notebook_runs_top_to_bottom_on_small_csv_files(tmp_path, monkeypatch):
     # The embedded copy fingerprints to the same value as the source it came from.
     assert manifest["identity"]["source_version"] == load_builder().source_hash()
     assert manifest["held_out_families"] == {
-        "cicids2017": ["dos", "portscan"],
+        "cicids2017_improved": ["dos", "portscan"],
         "unsw_nb15": ["exploits", "generic"],
     }
     assert "cannot fall below 0.05" in text
     assert "not corrected for testing many families" in text
     assert "Features to review:" in text
-    assert set(manifest["identity"]["data"]["source_sha256"]) == {"cicids2017", "unsw_nb15"}
-    assert len(manifest["identity"]["data"]["source_sha256"]["cicids2017"]) == 8
+    assert set(manifest["identity"]["data"]["source_sha256"]) == {"cicids2017_improved", "unsw_nb15"}
+    assert len(manifest["identity"]["data"]["source_sha256"]["cicids2017_improved"]) == 5
 
     # Seeds and the cross-dataset switch are set by the environment in this test.
     reference = load_config(ROOT / "configs" / "baseline.yaml")
@@ -125,5 +136,5 @@ def test_notebook_runs_top_to_bottom_on_small_csv_files(tmp_path, monkeypatch):
     assert f"'AEGIS_CROSS', '{int(reference.cross_dataset)}'" in settings_cell
 
     results = pd.read_csv(output / "results.csv")
-    assert (results["fold"] == "cross:cicids2017->unsw_nb15").any()
-    assert "Destination Port" not in json.dumps(manifest["family_counts"])
+    assert (results["fold"] == "cross:cicids2017_improved->unsw_nb15").any()
+    assert "Dst Port" not in json.dumps(manifest["family_counts"])

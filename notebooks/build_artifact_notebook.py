@@ -27,8 +27,8 @@ generalization:** the baseline was chosen using these same test results, and no 
 set is involved. Phase 1 stays open until this audit is reported.
 
 Every treatment refits the baseline on the same folds and is scored on identical held-out rows. Raw
-published rows give the primary recall, and deduplicated rows are a secondary sensitivity analysis.
-No label is changed.
+published rows give the primary recall. Two secondary views follow: raw rows without feature vectors
+that carry several attack families, and deduplicated rows. No label is changed.
 
 | Treatment | Question |
 | --- | --- |
@@ -38,7 +38,7 @@ No label is changed.
 | `service_marker_only` | With the reference and column removal, what does UNSW-NB15 take from `service`? |
 | `no_context_counts` | How much does UNSW-NB15 depend on its `ct_*` counts? |
 | `all_controls` | What remains with signatures, TCP windows and markers all controlled? |
-| `exclude_suspect_benign` | Do the possibly mislabeled CICIDS2017 benign rows change the result? |
+| `exclude_suspect_benign` | Do the possibly mislabeled benign rows of the original CICIDS2017 release change the result? (Not run on the improved release.) |
 
 **Before you start:** use the same data folder as the Config A run. Results go to a new folder,
 and this notebook only reads the earlier Config A folder.
@@ -153,13 +153,18 @@ print('7. Possibly mislabeled benign rows: original labels are primary, and this
 print('Attack rows are identical to the reference. Benign rows differ by design, so raw_fpr is shown too.')
 suspect = effects[effects['treatment'] == 'exclude_suspect_benign']
 display(suspect[['dataset', 'family', 'raw_recall_reference', 'raw_recall_treated', 'mean_diff', 'ci_low', 'ci_high']].round(3))
-display(main[main['treatment'].isin(['reference', 'exclude_suspect_benign'])
-             & (main['dataset'] == 'cicids2017')].pivot_table(
-    index='family', columns='treatment', values=['raw_fpr', 'raw_benign_rows']).round(4))
+# The suspect rows are listed for the original CICIDS2017 release only, so other datasets have no such run.
+if suspect.empty:
+    print('No dataset in this run has a suspect benign list, so this check was skipped.')
+else:
+    display(main[main['treatment'].isin(['reference', 'exclude_suspect_benign'])
+                 & main['dataset'].isin(suspect['dataset'].unique())].pivot_table(
+        index=['dataset', 'family'], columns='treatment', values=['raw_fpr', 'raw_benign_rows']).round(4))
 
-print('8. Secondary: raw versus deduplicated recall, reference treatment')
+print('8. Three evaluation views, reference treatment: raw rows (primary), without attack-label overlaps, deduplicated')
 display(reference.groupby(['dataset', 'family'])[
-    ['raw_recall', 'recall', 'raw_recall_at_oracle_fpr', 'raw_fpr', 'raw_conflicting_share', 'raw_attack_rows']
+    ['raw_recall', 'overlap_excluded_recall', 'recall', 'raw_attack_overlap_share', 'raw_attack_rows',
+     'overlap_excluded_attack_rows', 'raw_fpr', 'overlap_excluded_fpr', 'raw_conflicting_share']
 ].mean().round(3))
 print('Recall by whether a test flow matches a training attack apart from timing, reference treatment')
 display(reference.groupby(['dataset', 'family'])[
@@ -171,6 +176,10 @@ print(f"Comparisons under the rule: {rule['n_comparisons']} {rule['n_comparisons
       f"multiple-comparison correction. {rule['n_shortcut_dependent']} flagged.")
 print(f"{rule['n_not_testable']} comparisons cannot trigger the rule, because reference recall is already under 0.10:")
 display(effects[(effects['role'] == 'rule') & ~effects['rule_testable']][['dataset', 'family', 'treatment', 'raw_recall_reference']].round(3))
+print('Flagged without attack-label overlaps (secondary):')
+display(effects[effects['overlap_shortcut_dependent']][
+    ['dataset', 'family', 'treatment', 'overlap_excluded_recall_reference', 'overlap_excluded_recall_treated',
+     'overlap_mean_diff', 'overlap_ci_low', 'overlap_ci_high']].round(3))
 print('Flagged on deduplicated rows instead (secondary):')
 display(effects[effects['dedup_shortcut_dependent']][
     ['dataset', 'family', 'treatment', 'recall_reference', 'recall_treated', 'dedup_mean_diff', 'dedup_ci_low', 'dedup_ci_high']].round(3))

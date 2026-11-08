@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from aegis.experiments.artifacts import (
     REFERENCE,
     Treatment,
     build_raw_rows,
+    signature_columns,
     evaluate_raw,
     meets_shortcut_rule,
     missingness_frame,
@@ -112,7 +114,7 @@ def effect_rows(treatment, reference, treated, benign_hash="b", family="f"):
         for name, raw in ((REFERENCE, before), (treatment, after)):
             rows.append(
                 {"dataset": "d", "family": family, "target_fpr": 0.01, "seed": seed, "treatment": name,
-                 "raw_recall": raw, "recall": 0.5, "auc": 0.9, "attack_rows_hash": "a",
+                 "raw_recall": raw, "overlap_excluded_recall": raw, "recall": 0.5, "auc": 0.9, "attack_rows_hash": "a",
                  "benign_rows_hash": benign_hash if name == treatment else "b"}
             )
     return pd.DataFrame(rows)
@@ -127,6 +129,7 @@ def test_rule_uses_raw_recall_and_reports_every_comparison():
     effects = summarize_treatments(results, 100, 0.01).set_index("treatment")
     assert effects.loc["no_tcp_window", "shortcut_dependent"]
     assert not effects.loc["no_tcp_window", "dedup_shortcut_dependent"]  # Deduplicated recall did not move.
+    assert effects.loc["no_tcp_window", "overlap_shortcut_dependent"]
     assert not effects.loc["no_context_counts", "shortcut_dependent"]
     assert not effects.loc["missingness_only", "shortcut_dependent"]  # A probe, outside the rule.
     report = rule_report(effects.reset_index(), 0.01)
@@ -179,6 +182,28 @@ def test_raw_rows_restore_repeats_and_flag_conflicts():
     ]
 
 
+def test_overlap_marks_vectors_with_several_attack_families_and_keeps_them_in_raw_recall():
+    X = pd.DataFrame({"a": [1.0, 1.0, 1.0, 2.0, 2.0, 3.0, 4.0]})
+    family = np.array(["dos", "exploits", "benign", "dos", "benign", "dos", "benign"], dtype=object)
+    rows = build_raw_rows(Dataset("d", X, family))
+    table = pd.DataFrame({"v": rows.X["a"], "f": rows.family, "o": rows.attack_overlap}).sort_values(["v", "f"])
+    # Vector 1 carries dos and exploits, so all its entries are marked, benign included. Vector 2 is attack
+    # and benign only, which is not an attack-label overlap.
+    assert table["o"].tolist() == [True, True, True, False, False, False, False]
+
+    model = RandomForestBaseline(RandomForestConfig(), 0)
+    model.val_benign_scores = np.zeros(1000)
+    attack = rows.family.astype(str) == "dos"
+    benign = rows.family.astype(str) == "benign"
+    scores = np.where(rows.X["a"].to_numpy() == 1.0, -1.0, 1.0)  # Only the overlapping vector is missed.
+    result = evaluate_raw(model, rows, 0.01, scores[attack], -np.ones(benign.sum()), attack, benign)
+    assert result["raw_recall"] == pytest.approx(2 / 3)
+    assert result["overlap_excluded_recall"] == pytest.approx(1.0)
+    assert result["raw_attack_overlap_share"] == pytest.approx(1 / 3)
+    assert result["overlap_excluded_attack_rows"] == 2
+    assert result["overlap_excluded_benign_rows_removed"] == 1
+
+
 def test_raw_evaluation_weights_by_count():
     X = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]})
     rows = build_raw_rows(Dataset("d", X, np.array(["dos", "dos", "benign", "benign"], dtype=object)))
@@ -191,6 +216,166 @@ def test_raw_evaluation_weights_by_count():
     assert result["raw_distinct_recall"] == pytest.approx(0.5)
     assert result["raw_fpr"] == pytest.approx(0.75)  # Three of four benign rows.
     assert result["raw_attack_rows"] == 10
+
+
+# Feature columns of the original CICIDS2017 release as loaded (Destination Port and Fwd Header Length.1 dropped).
+ORIGINAL_COLUMNS = [
+    "Flow Duration", "Total Fwd Packets", "Total Backward Packets", "Total Length of Fwd Packets",
+    "Total Length of Bwd Packets", "Fwd Packet Length Max", "Fwd Packet Length Min", "Fwd Packet Length Mean",
+    "Fwd Packet Length Std", "Bwd Packet Length Max", "Bwd Packet Length Min", "Bwd Packet Length Mean",
+    "Bwd Packet Length Std", "Flow Bytes/s", "Flow Packets/s", "Flow IAT Mean", "Flow IAT Std", "Flow IAT Max",
+    "Flow IAT Min", "Fwd IAT Total", "Fwd IAT Mean", "Fwd IAT Std", "Fwd IAT Max", "Fwd IAT Min", "Bwd IAT Total",
+    "Bwd IAT Mean", "Bwd IAT Std", "Bwd IAT Max", "Bwd IAT Min", "Fwd PSH Flags", "Bwd PSH Flags", "Fwd URG Flags",
+    "Bwd URG Flags", "Fwd Header Length", "Bwd Header Length", "Fwd Packets/s", "Bwd Packets/s",
+    "Min Packet Length", "Max Packet Length", "Packet Length Mean", "Packet Length Std", "Packet Length Variance",
+    "FIN Flag Count", "SYN Flag Count", "RST Flag Count", "PSH Flag Count", "ACK Flag Count", "URG Flag Count",
+    "CWE Flag Count", "ECE Flag Count", "Down/Up Ratio", "Average Packet Size", "Avg Fwd Segment Size",
+    "Avg Bwd Segment Size", "Fwd Avg Bytes/Bulk", "Fwd Avg Packets/Bulk", "Fwd Avg Bulk Rate",
+    "Bwd Avg Bytes/Bulk", "Bwd Avg Packets/Bulk", "Bwd Avg Bulk Rate", "Subflow Fwd Packets", "Subflow Fwd Bytes",
+    "Subflow Bwd Packets", "Subflow Bwd Bytes", "Init_Win_bytes_forward", "Init_Win_bytes_backward",
+    "act_data_pkt_fwd", "min_seg_size_forward", "Active Mean", "Active Std", "Active Max", "Active Min",
+    "Idle Mean", "Idle Std", "Idle Max", "Idle Min",
+]
+UNSW_COLUMNS = [
+    "dur", "proto", "service", "state", "spkts", "dpkts", "sbytes", "dbytes", "rate", "sttl", "dttl", "sload",
+    "dload", "sloss", "dloss", "sinpkt", "dinpkt", "sjit", "djit", "swin", "stcpb", "dtcpb", "dwin", "tcprtt",
+    "synack", "ackdat", "smean", "dmean", "trans_depth", "response_body_len", "ct_srv_src", "ct_state_ttl",
+    "ct_dst_ltm", "ct_src_dport_ltm", "ct_dst_sport_ltm", "ct_dst_src_ltm", "is_ftp_login", "ct_ftp_cmd",
+    "ct_flw_http_mthd", "ct_src_ltm", "ct_srv_dst", "is_sm_ips_ports",
+]
+# Feature columns of the improved release (CNS 2022 labelling code), after identifiers and Dst Port are dropped.
+IMPROVED_COLUMNS = [
+    "Protocol", "Flow Duration", "Total Fwd Packet", "Total Bwd packets", "Total Length of Fwd Packet",
+    "Total Length of Bwd Packet", "Fwd Packet Length Max", "Fwd Packet Length Min", "Fwd Packet Length Mean",
+    "Fwd Packet Length Std", "Bwd Packet Length Max", "Bwd Packet Length Min", "Bwd Packet Length Mean",
+    "Bwd Packet Length Std", "Flow Bytes/s", "Flow Packets/s", "Flow IAT Mean", "Flow IAT Std", "Flow IAT Max",
+    "Flow IAT Min", "Fwd IAT Total", "Fwd IAT Mean", "Fwd IAT Std", "Fwd IAT Max", "Fwd IAT Min", "Bwd IAT Total",
+    "Bwd IAT Mean", "Bwd IAT Std", "Bwd IAT Max", "Bwd IAT Min", "Fwd PSH Flags", "Bwd PSH Flags", "Fwd URG Flags",
+    "Bwd URG Flags", "Fwd RST Flags", "Bwd RST Flags", "Fwd Header Length", "Bwd Header Length", "Fwd Packets/s",
+    "Bwd Packets/s", "Packet Length Min", "Packet Length Max", "Packet Length Mean", "Packet Length Std",
+    "Packet Length Variance", "FIN Flag Count", "SYN Flag Count", "RST Flag Count", "PSH Flag Count",
+    "ACK Flag Count", "URG Flag Count", "CWR Flag Count", "ECE Flag Count", "Down/Up Ratio", "Average Packet Size",
+    "Fwd Segment Size Avg", "Bwd Segment Size Avg", "Fwd Bytes/Bulk Avg", "Fwd Packet/Bulk Avg",
+    "Fwd Bulk Rate Avg", "Bwd Bytes/Bulk Avg", "Bwd Packet/Bulk Avg", "Bwd Bulk Rate Avg", "Subflow Fwd Packets",
+    "Subflow Fwd Bytes", "Subflow Bwd Packets", "Subflow Bwd Bytes", "FWD Init Win Bytes", "Bwd Init Win Bytes",
+    "Fwd Act Data Pkts", "Fwd Seg Size Min", "Active Mean", "Active Std", "Active Max", "Active Min", "Idle Mean",
+    "Idle Std", "Idle Max", "Idle Min", "ICMP Code", "ICMP Type", "Total TCP Flow Time",
+]
+IMPROVED_WINDOW = ("FWD Init Win Bytes", "Bwd Init Win Bytes")
+
+
+def frame_with(columns, rows=4, marker_columns=(), marker=-1.0):
+    X = pd.DataFrame(np.arange(1, rows * len(columns) + 1, dtype=np.float32).reshape(rows, len(columns)),
+                     columns=columns)
+    for column in marker_columns:
+        X.loc[0, column] = marker
+    return X
+
+
+def improved_like(columns=IMPROVED_COLUMNS) -> Dataset:
+    # The improved release writes an unobserved window as 0 (format check, 2026-11-08).
+    X = frame_with(columns, marker_columns=[c for c in IMPROVED_WINDOW if c in columns], marker=0.0)
+    return Dataset("cicids2017_improved", X, np.array(["benign", "dos", "portscan", "benign"], dtype=object))
+
+
+def add_improved_windows(folder: Path, rng: np.random.Generator) -> None:
+    """Give the improved-format notebook fixture the TCP window columns the real release has."""
+    for path in sorted(folder.glob("*day.csv")):
+        frame = pd.read_csv(path)
+        for column in IMPROVED_WINDOW:
+            frame[column] = rng.choice([0, 229, 8192, 65535], len(frame))
+        frame.to_csv(path, index=False)
+
+
+def test_original_release_treatments_and_signatures_are_unchanged():
+    # Written out from the plan the measured audit used, so any change to it fails here.
+    ds = Dataset("cicids2017", frame_with(ORIGINAL_COLUMNS, marker_columns=["Init_Win_bytes_forward"]),
+                 np.array(["benign", "dos", "portscan", "benign"], dtype=object))
+    window = ("Init_Win_bytes_forward", "Init_Win_bytes_backward")
+    assert treatments_for(ds, has_suspect_benign=True) == [
+        Treatment(REFERENCE),
+        Treatment("remove_matching_signatures", remove_signatures=True),
+        Treatment("no_tcp_window", drop=window),
+        Treatment("neutralize_missing_markers", neutralize=window),
+        Treatment("missingness_only", missingness_only=True),
+        Treatment("exclude_suspect_benign", exclude_suspect=True),
+        Treatment("all_controls", drop=window, remove_signatures=True),
+    ]
+    old_timing = re.compile(r"Duration|IAT|/s|Active|Idle|Bulk Rate")
+    assert signature_columns(ds) == [c for c in ORIGINAL_COLUMNS if not old_timing.search(c)]
+    assert missingness_frame(ds).columns.tolist() == ["Init_Win_bytes_forward_marker", "Init_Win_bytes_backward_marker"]
+
+
+def test_unsw_treatments_and_signatures_are_unchanged():
+    X = frame_with(UNSW_COLUMNS).astype(object)
+    X["proto"], X["state"], X["service"] = "tcp", "FIN", ["-", "dns", "http", "-"]
+    ds = Dataset("unsw_nb15", X, np.array(["benign", "dos", "exploits", "benign"], dtype=object),
+                 ("proto", "service", "state"))
+    context = tuple(c for c in UNSW_COLUMNS if c.startswith("ct_"))
+    assert treatments_for(ds) == [
+        Treatment(REFERENCE),
+        Treatment("remove_matching_signatures", remove_signatures=True),
+        Treatment("no_tcp_window", drop=("swin", "dwin")),
+        Treatment("neutralize_missing_markers", drop=("service",)),
+        Treatment("missingness_only", missingness_only=True),
+        Treatment("no_context_counts", drop=context),
+        Treatment("service_marker_only", marker_only=("service",)),
+        Treatment("all_controls", drop=("swin", "dwin", "service"), remove_signatures=True),
+    ]
+    excluded = {"dur", "rate", "sload", "dload", "sinpkt", "dinpkt", "sjit", "djit", "tcprtt", "synack", "ackdat",
+                "stcpb", "dtcpb"}
+    assert signature_columns(ds) == [c for c in UNSW_COLUMNS if c not in excluded]
+
+
+def test_improved_release_uses_its_own_column_names():
+    ds = improved_like()
+    plan = {t.name: t for t in treatments_for(ds)}
+    assert list(plan) == [REFERENCE, "remove_matching_signatures", "no_tcp_window", "neutralize_missing_markers",
+                          "missingness_only", "all_controls"]
+    assert plan["no_tcp_window"].drop == IMPROVED_WINDOW
+    assert plan["neutralize_missing_markers"].neutralize == IMPROVED_WINDOW
+    assert plan["neutralize_missing_markers"].marker == 0
+    assert plan["all_controls"].drop == IMPROVED_WINDOW and plan["all_controls"].remove_signatures
+    assert missingness_frame(ds).columns.tolist() == [f"{c}_marker" for c in IMPROVED_WINDOW]
+    neutral = treated_features(ds, plan["neutralize_missing_markers"], np.arange(4), missingness_frame(ds))
+    assert neutral[list(IMPROVED_WINDOW)].isna().sum().tolist() == [1, 1]
+
+
+def test_improved_signatures_leave_out_timing_only():
+    kept = set(signature_columns(improved_like()))
+    timing = {"Flow Duration", "Flow Bytes/s", "Flow Packets/s", "Fwd IAT Mean", "Bwd IAT Total", "Fwd Packets/s",
+              "Active Mean", "Idle Max", "Fwd Bulk Rate Avg", "Bwd Bulk Rate Avg", "Total TCP Flow Time"}
+    assert not timing & kept
+    assert {"Fwd Bytes/Bulk Avg", "Fwd Packet/Bulk Avg", "Fwd Act Data Pkts", "Total Fwd Packet",
+            *IMPROVED_WINDOW, "ICMP Type"} <= kept
+    assert len(IMPROVED_COLUMNS) - len(kept) == 30  # Duration 1, rates 4, IAT 14, bulk rates 2, active/idle 8, TCP time 1.
+
+
+@pytest.mark.parametrize("missing", IMPROVED_WINDOW)
+def test_improved_release_refuses_an_absent_window_column(missing):
+    ds = improved_like([c for c in IMPROVED_COLUMNS if c != missing])
+    with pytest.raises(ValueError, match=missing):
+        treatments_for(ds)
+    with pytest.raises(ValueError, match=missing):
+        missingness_frame(ds)
+
+
+def test_improved_release_with_original_names_is_refused():
+    columns = [c for c in IMPROVED_COLUMNS if c not in IMPROVED_WINDOW] + ["Init_Win_bytes_forward",
+                                                                        "Init_Win_bytes_backward"]
+    with pytest.raises(ValueError, match="FWD Init Win Bytes"):
+        treatments_for(improved_like(columns))
+
+
+def test_improved_release_without_timing_columns_is_refused():
+    columns = [c for c in IMPROVED_COLUMNS if not re.search(r"Duration|IAT|/s|Active|Idle|Bulk Rate|Flow Time", c)]
+    with pytest.raises(ValueError, match="timing"):
+        signature_columns(improved_like(columns))
+
+
+def test_unknown_real_dataset_has_no_profile():
+    with pytest.raises(ValueError, match="profile"):
+        treatments_for(Dataset("cse_cic_ids2018", frame_with(["a"]), np.array(["benign"] * 4, dtype=object)))
 
 
 def small_config(seeds=(0,)) -> BaselineConfig:
@@ -215,6 +400,7 @@ def test_run_writes_only_to_its_folder_and_resumes(tmp_path):
     rule = json.loads((out / "shortcut_rule.json").read_text(encoding="utf-8"))
     assert rule["n_comparisons"] == reference["family"].nunique() * 2
     assert rule["primary_metric"] == "raw_recall"
+    assert results["overlap_excluded_recall"].notna().all()
 
     lines = []
     again = run(small_config(), out, log=lines.append)
@@ -245,6 +431,20 @@ def test_label_sensitivity_excludes_rows_only_in_its_own_treatment(tmp_path, mon
     assert manifest["identity"]["extra"]["suspect_benign_excluded_in_sensitivity_only"]["synthetic_a"]["cleaned_rows"] == 200
 
 
+def test_saved_scores_reproduce_the_reported_recall(tmp_path):
+    out = tmp_path / "scored"
+    results = run(small_config(), out, log=lambda message: None, save_scores=True)
+    row = results[(results["treatment"] == REFERENCE) & (results["target_fpr"] == 0.01)].iloc[0]
+    saved = np.load(out / "scores" / f"synthetic_a_seed0_reference__{row['family']}.npz")
+    threshold = saved["thresholds"][list(saved["target_fprs"]).index(0.01)]
+    attack, count = saved["raw_is_attack"], saved["raw_count"]
+    caught = saved["raw_score"] > threshold
+    assert count[attack & caught].sum() / count[attack].sum() == pytest.approx(row["raw_recall"])
+    assert (saved["test_score"][saved["test_is_attack"]] > threshold).mean() == pytest.approx(row["recall"])
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["identity"]["extra"]["per_row_scores"] is True
+
+
 def _load(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -265,6 +465,7 @@ def test_notebook_uses_a_new_folder_and_runs_on_small_csv_files(tmp_path, monkey
     fixtures = _load("test_notebook_fixtures", ROOT / "tests" / "test_notebook.py")
     rng = np.random.default_rng(0)
     fixtures.cicids_fixture(tmp_path / "data" / "CIC" / "MachineLearningCVE", rng)
+    add_improved_windows(tmp_path / "data" / "CIC" / "MachineLearningCVE", rng)
     fixtures.unsw_fixture(tmp_path / "data" / "UNSW", rng)
     output = tmp_path / "results" / "config_a_artifacts"
     monkeypatch.setenv("AEGIS_DATA_ROOT", str(tmp_path / "data"))
@@ -286,6 +487,8 @@ def test_notebook_uses_a_new_folder_and_runs_on_small_csv_files(tmp_path, monkey
         assert set(bundle.namelist()) == {"manifest.json", "results.csv", "treatment_effects.csv", "shortcut_rule.json"}
     results = pd.read_csv(output / "results.csv")
     assert {"neutralize_missing_markers", "missingness_only", "service_marker_only"} <= set(results["treatment"])
+    improved = set(results.loc[results["dataset"] == "cicids2017_improved", "treatment"])
+    assert {"no_tcp_window", "neutralize_missing_markers"} <= improved
     assert "not an unbiased generalization estimate" in text
     assert set(results["seed"]) == {0, 1}
 

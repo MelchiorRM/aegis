@@ -10,7 +10,7 @@ import yaml
 
 @dataclass(frozen=True)
 class DatasetConfig:
-    kind: str  # cicids2017, unsw_nb15 or synthetic
+    kind: str  # cicids2017, cicids2017_improved, unsw_nb15 or synthetic
     path: str | None = None
     name: str | None = None
     seed: int = 0

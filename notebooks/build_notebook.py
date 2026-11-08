@@ -63,7 +63,7 @@ the score is. A weak or null result still counts.
 
 **Before you start**
 1. Put the datasets in the folder set by `DATA_ROOT` in the next cell:
-   - CICIDS2017: the 8 `MachineLearningCVE` CSV files
+   - CICIDS2017, improved release (CNS 2022): `monday.csv` to `friday.csv`
    - UNSW-NB15: `UNSW_NB15_training-set.csv` and `UNSW_NB15_testing-set.csv`
 2. Choose a machine with more than 12 GB of RAM. A GPU is optional and has little effect,
    because most of the time goes to the Random Forest, which runs on CPU.
@@ -90,13 +90,13 @@ if IN_COLAB:
     from google.colab import drive
     drive.mount('/content/drive')
     default_data = '/content/drive/MyDrive/aegis/data'
-    default_output = '/content/drive/MyDrive/aegis/results/config_a'
+    default_output = '/content/drive/MyDrive/aegis/results/config_a_improved'
 elif IN_KAGGLE:
     default_data = '/kaggle/input'
-    default_output = '/kaggle/working/results/config_a'
+    default_output = '/kaggle/working/results/config_a_improved'
 else:
     default_data = '../data' if os.path.basename(os.getcwd()) == 'notebooks' else 'data'
-    default_output = '../results/config_a' if os.path.basename(os.getcwd()) == 'notebooks' else 'results/config_a'
+    default_output = '../results/config_a_improved' if os.path.basename(os.getcwd()) == 'notebooks' else 'results/config_a_improved'
 
 # Edit these if your folders differ. The AEGIS_ variables are used by the automated test.
 DATA_ROOT = os.environ.get('AEGIS_DATA_ROOT', default_data)
@@ -187,8 +187,8 @@ from aegis.data.loaders import locate_data
 located = locate_data(DATA_ROOT) if os.path.isdir(DATA_ROOT) else {}
 for name, folder in located.items():
     print(f'{name}: {folder}')
-if len(located) < 2:
-    absent = sorted({'cicids2017', 'unsw_nb15'} - set(located))
+absent = sorted({'cicids2017_improved', 'unsw_nb15'} - set(located))
+if absent:
     raise FileNotFoundError(
         f'Could not find {absent} under {DATA_ROOT}. See the first cell for the expected files.'
     )
@@ -196,8 +196,8 @@ if len(located) < 2:
 config = BaselineConfig(
     datasets=(
         # A port identifies the service, so it can stand in for the attack family.
-        DatasetConfig(kind='cicids2017', path=str(located['cicids2017']),
-                      drop_columns=('Destination Port',)),
+        DatasetConfig(kind='cicids2017_improved', path=str(located['cicids2017_improved']),
+                      drop_columns=('Dst Port',)),
         DatasetConfig(kind='unsw_nb15', path=str(located['unsw_nb15'])),
     ),
     seeds=tuple(SEEDS),

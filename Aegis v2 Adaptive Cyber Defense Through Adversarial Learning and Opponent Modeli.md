@@ -99,7 +99,7 @@ The protocol exists to stop two agents from becoming good only at playing each o
 - **Unseen families:** leave-one-attack-family-out on CICIDS2017 and UNSW-NB15; attack families in the holdout are never seen by the defender or the attacker's generator.
 - **Artifact resistance:** a held-out result counts as generalization only after it is tested against dataset shortcuts. This run is an artifact-resistance and sensitivity audit of the selected baseline, not an unbiased estimate of final generalization, because that baseline was chosen using the same test results. Each treatment refits the baseline on the same folds, in a separate output folder that preserves earlier results:
   - **Near-duplicates:** remove training attack rows that match the held-out family apart from timing.
-  - **Duplicate handling:** recall on all published rows is primary. Recall on deduplicated rows is a secondary sensitivity analysis.
+  - **Duplicate handling:** recall is reported in three evaluation views, defined below. Raw published rows are primary.
   - **Host fingerprints:** remove TCP window features.
   - **Missingness:** neutralize missing-value markers, and test a model that sees only those markers.
   - **UNSW-NB15 `service`:** the publisher defines `-` as "not much used service", so it is a catch-all category and not missing data. Compare the column removed, `-` kept as a category (the reference), and the column reduced to a flag for `-`.
@@ -107,12 +107,87 @@ The protocol exists to stop two agents from becoming good only at playing each o
   - **Combined:** apply the near-duplicate, TCP window and marker controls together, as a conservative baseline against several shortcuts at once.
 - **Shortcut rule:** compare the original model with each treatment on identical held-out rows and seeds, and take the per-seed difference in raw-row recall at the primary false-positive rate. A family's result is shortcut-dependent only if the mean recall drop is at least 0.10 and the 95% confidence interval of that mean lies entirely above zero, on the side of a decrease. The rule applies the same way to every family and to the signature, TCP window, marker, context count and combined treatments. The total number of comparisons is reported, with no multiple-comparison correction. A family whose reference recall is below 0.10 cannot meet the rule and is reported as not testable, not as passing. This rule was set before the artifact-resistance run.
 - **Labels:** no label is changed because of a suspected error. Suspect traffic is examined in its original capture context. The 38,045 CICIDS2017 benign rows sent from victim to attacker, which may be attack replies, keep their labels and stay in the primary evaluation. A separate sensitivity run excludes them from training, validation and test, and the difference is reported.
-- **Final generalization claims:** no final generalization claim comes from data used to select a model or threshold, which includes every Config A and artifact-resistance result. Before such a claim, reserve an untouched evaluation set or adopt a nested evaluation protocol, so that model and threshold selection have no access to the final set.
+- **Final generalization claims:** no final generalization claim comes from data used to select a model or threshold, which includes every Config A and artifact-resistance result. The protocol for selection and the untouched test is set out below.
 - **Cross-dataset:** train on one dataset, test on the other using shared features only.
 - **Prevalence:** report PR-AUC and precision at realistic benign prevalence, not only on balanced sets.
 - **Fixed baselines:** re-evaluate every checkpoint against frozen reference opponents to detect overfitting to the current attacker.
 - **Statistics:** 5-10 random seeds, bootstrap confidence intervals, paired tests, and effect sizes for each claim.
 - **Safety:** the attacker acts only inside the simulation or an explicitly authorized isolated lab.
+
+## Training cleaning and evaluation views
+
+**Cleaning.** Before any split, each dataset is cleaned once. Every row whose exact feature vector appears under more than one family is removed, then one copy of each remaining vector is kept. The feature vector is what the model sees: identifiers are dropped, and so is `Destination Port` in CICIDS2017. Families are compared after label mapping, so CICIDS2017 `DDoS` counts as `dos`. Cleaning fits no statistics, so it cannot carry test information into a model. Training, validation and the deduplicated test set all come from the cleaned rows.
+
+**Effect on alignment.** Raw test rows also include repeats and conflicting vectors. Conflicting vectors were never available for training, so the raw test distribution differs from the training distribution. The per-family effect is measured in `results/config_a_artifacts/analysis/cleaning_alignment.txt`:
+
+| Dataset | Family | Raw rows | Kept | Repeats removed | Conflicts with benign | Conflicts with another attack family |
+| --- | --- | --- | --- | --- | --- | --- |
+| CICIDS2017 | All | 2,830,743 | 2,199,163 (77.7%) | 548,464 | 83,116 | 0 |
+| CICIDS2017 | PortScan | 158,930 | 1,851 (1.2%) | 80,757 | 76,322 | 0 |
+| CICIDS2017 | Brute force | 13,835 | 9,152 (66.2%) | 4,683 | 0 | 0 |
+| UNSW-NB15 | All | 257,673 | 151,239 (58.7%) | 66,034 | 1,756 | 38,644 |
+| UNSW-NB15 | Generic | 58,871 | 7,283 (12.4%) | 51,215 | 0 | 373 |
+| UNSW-NB15 | DoS | 16,353 | 3,624 (22.2%) | 66 | 0 | 12,663 |
+| UNSW-NB15 | Analysis | 2,677 | 450 (16.8%) | 166 | 0 | 2,061 |
+| UNSW-NB15 | Backdoor | 2,329 | 350 (15.0%) | 2 | 0 | 1,977 |
+| UNSW-NB15 | Exploits | 44,525 | 25,451 (57.2%) | 2,567 | 0 | 16,507 |
+
+Benign rows that share a vector with an attack row count under "conflicts with benign". The shift is largest on UNSW-NB15, where attacks are 63.9% of raw rows but 43.6% of cleaned rows. Generic loses mostly repeats, while analysis, backdoor and DoS lose mostly vectors shared with other attack families. In CICIDS2017, PortScan keeps 1.2% of its raw rows, because about half repeat and half match benign rows. Every other CICIDS2017 family keeps 66% or more. A raw-view result therefore weights flows that the model could never have trained on, and the secondary views separate that effect.
+
+**Views.** Recall is reported in three views, with the same threshold in each. No label is changed, and no row leaves the primary view.
+
+| View | Rows | Role |
+| --- | --- | --- |
+| Raw | All published rows of the held-out family, and the benign rows of the test partition with their repeats, plus benign rows removed as conflicting | Primary: the published dataset as released |
+| Overlap-excluded | Raw rows, without feature vectors that carry two or more attack families | Secondary sensitivity analysis |
+| Deduplicated | Cleaned test rows only | Secondary sensitivity analysis |
+
+An attack-label overlap is an exact feature vector found under two or more attack families. A vector found under one attack family and benign is not an overlap. When a vector is an overlap, all its rows leave the overlap-excluded view, benign rows included. UNSW-NB15 has 2,032 such vectors, covering 38,644 of 164,673 raw attack rows (23.5%) and 2 benign rows. CICIDS2017 has none, so its overlap-excluded view equals its raw view.
+
+## Phase 1 results
+
+These results come from the artifact-resistance audit of 2026-11-08. It is a sensitivity audit of the selected baseline, not an unbiased estimate of generalization. Raw recall at 1% FPR, 5 seeds.
+
+The rule was applied to 60 comparisons. 8 met it, and 18 were not testable because reference recall was under 0.10 (CICIDS2017 bot and PortScan, UNSW-NB15 analysis and fuzzers). Three of the 8 come from the combined treatment and repeat a single-treatment result, which leaves five distinct shortcut dependencies:
+
+| Dataset | Family | Depends on | Recall: reference to treated |
+| --- | --- | --- | --- |
+| CICIDS2017 | Web attack | Near-duplicate signatures of training attacks | 0.874 to 0.043 |
+| CICIDS2017 | DoS | TCP window features | 0.417 to 0.163 |
+| UNSW-NB15 | Shellcode | `ct_*` context counts | 0.716 to 0.216 |
+| UNSW-NB15 | Reconnaissance | `ct_*` context counts | 0.477 to 0.202 |
+| UNSW-NB15 | Generic | The `service` column | 0.212 to 0.034 |
+
+Generic's dependence is on `service` itself, not on missingness: `-` is a documented category. The combined treatment repeats the web attack (0.014), DoS (0.154) and generic (0.043) results.
+
+- **Inconclusive:** brute force without TCP windows falls from 0.194 to 0.071, a drop of 0.122, but the interval runs from -0.010 to 0.235. It is classified as inconclusive, neither shortcut-dependent nor robust.
+- **Labels:** the possibly mislabeled CICIDS2017 benign rows keep their labels in every primary result. Excluding them, as a separate sensitivity analysis, raises brute force from 0.194 to 0.269 and DoS from 0.417 to 0.459, and changes no other family.
+
+## Baseline selection and the untouched test
+
+**Development data.** CICIDS2017 and UNSW-NB15 are development data from now on. Every result on them has been seen, and the Random Forest baseline was chosen using their test results. No final generalization claim can come from them.
+
+**Frozen baseline.** Config A is frozen before any final test: Random Forest settings, preprocessing, cleaning, dropped features, training cap, and the threshold rule (the validation-benign quantile at the target false-positive rate). The freeze is recorded by source version and configuration file, and is not changed after the untouched data is loaded.
+
+**Selection for Configs B to E.** Models, thresholds and hyperparameters are selected on development data only, with a nested protocol. For each outer held-out family, an inner leave-one-family-out loop over the remaining training families makes every selection. The outer family is used only to report development results, never to choose.
+
+**Untouched test.** The final test uses a dataset that no one in this project has loaded. The proposed dataset is CSE-CIC-IDS2018, because it is produced with CICFlowMeter and has nearly the same features as CICIDS2017, though some column names need mapping. This is a proposal and needs confirmation before download. Its known caveats include labeling errors and tool artifacts similar to those in CICIDS2017, so the same audit treatments apply.
+
+- **Pre-registration:** before the first load, record the metrics, the three views, the shortcut rule, the families, and every planned comparison.
+- **One evaluation:** each frozen configuration is evaluated once. Any rerun after results have been seen is reported as such, with the reason.
+- **Data handling:** checksums are recorded at download. The data is not explored before the pre-registered evaluation, beyond the schema and label checks the loaders run.
+
+**Phase 1 exit criteria.** Phase 1 closes when the artifact audit is reported, the three UNSW-NB15 views are reviewed, this protocol is fixed, and Config A is frozen. Documentation is not enough: the safeguards below must be implemented in code and verified by tests. Config B and adversarial co-training do not start before then.
+
+**Required safeguards, implemented and tested:**
+1. **Nested selection:** a selection routine that, for each outer held-out family, chooses among candidates by inner leave-one-family-out on the training families only. A test must show that it never reads outer test rows.
+2. **Baseline re-check:** run nested selection over the Config A candidate scores (rf, ae, fused) and report whether rf is still selected without test access. The result is reported either way.
+3. **Frozen baseline:** a recorded identity for Config A (settings, preprocessing, cleaning, threshold rule, source hash). Later runs refuse to call a model Config A if it differs.
+4. **Untouched-test guard:** the external test set can be loaded only through a guarded entry point. It refuses to run without a pre-registration file matching the frozen identity, and it logs every access.
+
+Status, 2026-11-08: all four are implemented and tested. The baseline re-check has not been run yet.
+
+The external dataset is assessed in `docs/cse-cic-ids2018-assessment.md`. It is not acquired until the project owner confirms it.
 
 ## Extension: conditional generative model
 
@@ -128,7 +203,7 @@ The GAN is postponed, not abandoned. A generator is worth adding only if it impr
 
 The work runs in five phases; each ends in a measured gate before the next begins. Dates are open until the available weeks and weekly hours are known.
 
-1. **Foundation and baseline:** environment, data pipeline, Config A. Gate: Config A measured on held-out families, and the artifact audit complete, with its dependence on dataset shortcuts reported.
+1. **Foundation and baseline:** environment, data pipeline, Config A. Gate: the Phase 1 exit criteria above: audit reported, three UNSW-NB15 views reviewed, selection and untouched-test protocol fixed, and Config A frozen.
 2. **Fixed adversarial scenarios:** realization layer, scripted attacker, Config B. Gate: Config B measured against A.
 3. **Co-training:** RL attacker, historical league, Config C. Gate: C compared with A and B on held-out families.
 4. **Opponent modeling:** prediction models, Configs D and E. Gate: D and E compared with C.

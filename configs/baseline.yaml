@@ -2,10 +2,12 @@
 # Use a machine with more than 12 GB of RAM. Full runs normally use the notebook, and a test
 # checks that its experiment settings match this file. Only n_jobs and device may differ.
 datasets:
-  - kind: cicids2017
-    path: data/cicids2017
+  # The improved CICIDS2017 release (CNS 2022): fixed CICFlowMeter, corrected labels, "Attempted" flows
+  # excluded from training and from the primary metric. Replaced the original release on 2026-11-08.
+  - kind: cicids2017_improved
+    path: data/cicids2017_improved
     # A port identifies the service, so it can stand in for the attack family.
-    drop_columns: ["Destination Port"]
+    drop_columns: ["Dst Port"]
   - kind: unsw_nb15
     path: data/unsw_nb15
 

@@ -27,6 +27,13 @@ import torch
 
 from aegis.config import BaselineConfig, load_config
 from aegis.data.dataset import BENIGN, Dataset, remove_duplicates
+from aegis.data.improved import (
+    NAME as IMPROVED_KIND,
+    AttemptedRows,
+    DatasetWithAttempted,
+    load_with_attempted,
+    remove_repeated_attempted,
+)
 from aegis.data.loaders import dataset_files, load_dataset, project_to_shared
 from aegis.data.splits import (
     Fold,
@@ -40,6 +47,7 @@ from aegis.evaluation.metrics import (
     bootstrap_ci,
     evaluate_scores,
     paired_comparison,
+    precision_at_prevalence,
     threshold_at_fpr,
 )
 from aegis.models.baseline import SCORERS, RFAEBaseline
@@ -97,6 +105,69 @@ class Progress:
         )
 
 
+def _hash_rows(X: pd.DataFrame) -> np.ndarray:
+    return pd.util.hash_pandas_object(X, index=False).to_numpy()
+
+
+@dataclasses.dataclass
+class _AttemptedScores:
+    """A fold's scores on the dataset's "Attempted" flows, which are benign in the secondary view."""
+
+    scores: dict[str, np.ndarray]
+    copies_training: np.ndarray  # The row's feature vector equals some training row of this fold.
+    share: float  # Attempted share of all benign-view rows: n_attempted / (n_attempted + n_benign).
+
+
+def _score_attempted(
+    model: RFAEBaseline, ds: Dataset, train: np.ndarray, row_hashes: np.ndarray | None
+) -> _AttemptedScores | None:
+    """Score every attempted row; none is ever trained on, so scoring all of them leaks nothing.
+
+    Duplicates: repeats among attempted rows were removed when the data was prepared. An attempted
+    row whose features copy a training row of this fold is kept, because a deployed detector would
+    see it too, and dropping it would hide the very flows where "attempted" and "attack" look alike.
+    It is counted instead (``n_attempted_dup_train`` and its alarms), so its effect can be bounded.
+    """
+    rows: AttemptedRows | None = getattr(ds, "attempted", None)
+    if rows is None or row_hashes is None:
+        return None
+    copies = np.isin(_hash_rows(rows.X), row_hashes[train])
+    n_benign = int((ds.family == BENIGN).sum())
+    return _AttemptedScores(model.scores(rows.X), copies, len(rows) / (len(rows) + n_benign))
+
+
+def _attempted_columns(
+    attempted: _AttemptedScores,
+    scorer: str,
+    threshold: float,
+    metrics: dict[str, float],
+    prevalences,
+) -> dict[str, float]:
+    """Secondary metric: attempted flows counted as benign traffic.
+
+    Recall is unchanged by construction, since attempted rows are benign in this view and add no
+    attack rows. The FPR mixes the test-benign FPR with the attempted alarm rate at the attempted
+    share of the whole dataset. Adding every attempted row to the test benign rows unweighted would
+    overweight them by about 1 / test_fraction, because only that share of benign rows is tested.
+    """
+    alarms = attempted.scores[scorer] > threshold
+    rate = float(alarms.mean()) if alarms.size else float("nan")
+    fpr = (1 - attempted.share) * metrics["realized_fpr"] + attempted.share * (rate if alarms.size else 0.0)
+    columns = {
+        "n_attempted": int(alarms.size),
+        "n_attempted_dup_train": int(attempted.copies_training.sum()),
+        "n_attempted_dup_train_alarms": int(alarms[attempted.copies_training].sum()),
+        "attempted_share": attempted.share,
+        "attempted_alarm_rate": rate,
+        "realized_fpr_with_attempted": float(fpr),
+    }
+    for prevalence in prevalences:
+        columns[f"precision_prev_{prevalence:g}_with_attempted"] = precision_at_prevalence(
+            metrics["recall"], fpr, prevalence
+        )
+    return columns
+
+
 def _score_rows(
     model: RFAEBaseline,
     fit_seconds: float,
@@ -107,8 +178,12 @@ def _score_rows(
     eval_families: list[str],
     config: BaselineConfig,
     seed: int,
+    attempted: _AttemptedScores | None = None,
 ) -> list[dict]:
-    """Evaluate one fitted model. Thresholds come only from validation benign scores."""
+    """Evaluate one fitted model. Thresholds come only from validation benign scores.
+
+    With ``attempted``, each row also gets the secondary columns; without, rows are as before.
+    """
     scores = model.scores(target.X.iloc[test_rows])
     families = target.family[test_rows].astype(str)
     rows = []
@@ -121,6 +196,16 @@ def _score_rows(
         for scorer in SCORERS:
             for target_fpr in config.target_fprs:
                 threshold = threshold_at_fpr(model.val_benign_scores[scorer], target_fpr)
+                metrics = evaluate_scores(
+                    y, scores[scorer][mask], threshold, target_fpr, config.attack_prevalences
+                )
+                secondary = (
+                    {}
+                    if attempted is None
+                    else _attempted_columns(
+                        attempted, scorer, threshold, metrics, config.attack_prevalences
+                    )
+                )
                 rows.append(
                     {
                         "dataset": source.name,
@@ -133,9 +218,8 @@ def _score_rows(
                         "n_attack": int(y.sum()),
                         "n_benign": int((y == 0).sum()),
                         "fit_seconds": fit_seconds,
-                        **evaluate_scores(
-                            y, scores[scorer][mask], threshold, target_fpr, config.attack_prevalences
-                        ),
+                        **metrics,
+                        **secondary,
                     }
                 )
     return rows
@@ -151,7 +235,9 @@ def _run_fold(
     seed: int,
     store: FoldStore,
     progress: Progress,
+    row_hashes: Callable[[], np.ndarray] | None = None,
 ) -> None:
+    """``row_hashes`` gives the source rows' feature hashes, needed only for attempted rows."""
     if store.done(source.name, seed, fold.name):
         progress.skip()
         return
@@ -165,8 +251,11 @@ def _run_fold(
         source.categorical,
     )
     fit_seconds = time.perf_counter() - start
+    attempted = None
+    if source is target and getattr(target, "attempted", None) is not None:
+        attempted = _score_attempted(model, target, fold.train, row_hashes() if row_hashes else None)
     rows = _score_rows(
-        model, fit_seconds, source, target, test_rows, fold.name, eval_families, config, seed
+        model, fit_seconds, source, target, test_rows, fold.name, eval_families, config, seed, attempted
     )
     store.save(source.name, seed, fold.name, rows)
     progress.update(f"seed {seed} {source.name} {fold.name}", time.perf_counter() - start)
@@ -182,11 +271,20 @@ def evaluate_within_dataset(
     if not families:
         raise ValueError(f"{ds.name}: no family reaches min_family_count={config.min_family_count}")
 
+    cache: list[np.ndarray] = []
+
+    def row_hashes() -> np.ndarray:  # Hashed once, and only if a fold with attempted rows runs.
+        if not cache:
+            cache.append(_hash_rows(ds.X))
+        return cache[0]
+
     fold = seen_fold(partition, ds.family, config.max_train_per_family, seed)
-    _run_fold(ds, ds, fold, fold.test, [ALL_ATTACKS, *families], config, seed, store, progress)
+    _run_fold(
+        ds, ds, fold, fold.test, [ALL_ATTACKS, *families], config, seed, store, progress, row_hashes
+    )
     for family in families:
         fold = holdout_fold(partition, ds.family, family, config.max_train_per_family, seed)
-        _run_fold(ds, ds, fold, fold.test, [family], config, seed, store, progress)
+        _run_fold(ds, ds, fold, fold.test, [family], config, seed, store, progress, row_hashes)
 
 
 def evaluate_cross_dataset(
@@ -208,7 +306,7 @@ def evaluate_cross_dataset(
 def summarize(results: pd.DataFrame, samples: int) -> pd.DataFrame:
     """Mean and bootstrap interval across seeds for each metric."""
     group = ["dataset", "test_dataset", "fold", "eval_family", "scorer", "target_fpr"]
-    metrics = [c for c in results.columns if c not in ID_COLUMNS and c not in ("n_attack", "n_benign")]
+    metrics = [c for c in results.columns if c not in ID_COLUMNS and not c.startswith("n_")]
     rows = []
     for key, part in results.groupby(group, sort=True):
         row = dict(zip(group, key), n_seeds=part["seed"].nunique())
@@ -267,10 +365,27 @@ def phase1_gate(results: pd.DataFrame, datasets: list[Dataset], config: Baseline
 
 
 def prepare_datasets(config: BaselineConfig) -> tuple[list[Dataset], dict[str, dict[str, int]]]:
-    """Load and clean every configured dataset, returning the cleaning counts too."""
+    """Load and clean every configured dataset, returning the cleaning counts too.
+
+    The improved CICIDS2017 comes back as a ``DatasetWithAttempted``: the primary rows cleaned as
+    usual, plus its "Attempted" flows (repeats removed) for the secondary metric. Its cleaning
+    counts gain the attempted row counts; other datasets are unchanged.
+    """
     datasets, cleaning = [], {}
     for dataset_config in config.datasets:
-        cleaned, stats = remove_duplicates(load_dataset(dataset_config))
+        if dataset_config.kind == IMPROVED_KIND:
+            if dataset_config.path is None:
+                raise ValueError(f"Dataset {dataset_config.kind} needs a path")
+            loaded, attempted = load_with_attempted(dataset_config.path, dataset_config.drop_columns)
+            cleaned, stats = remove_duplicates(loaded)
+            del loaded
+            attempted, attempted_stats = remove_repeated_attempted(attempted)
+            cleaned = DatasetWithAttempted(
+                cleaned.name, cleaned.X, cleaned.family, cleaned.categorical, attempted
+            )
+            stats = {**stats, **attempted_stats}
+        else:
+            cleaned, stats = remove_duplicates(load_dataset(dataset_config))
         datasets.append(cleaned)
         cleaning[cleaned.name] = stats
     return datasets, cleaning

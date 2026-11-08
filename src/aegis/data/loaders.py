@@ -1,4 +1,5 @@
-"""Loaders for CICIDS2017 and UNSW-NB15, a shared feature view, and generated data.
+"""Loaders for CICIDS2017, UNSW-NB15 and (in ``improved``) the improved CICIDS2017, a shared feature view,
+and generated data.
 
 The real loaders expect the published CSV files and raise an error on labels or
 columns they do not recognize, so a different dataset release cannot be misread.
@@ -68,6 +69,18 @@ SHARED_FEATURES = {
         "src_interarrival_ms": ("Fwd IAT Mean", 1e-3),
         "dst_interarrival_ms": ("Bwd IAT Mean", 1e-3),
     },
+    # Names from the improved release's labelling code; the means are unverified until first load.
+    "cicids2017_improved": {
+        "duration_s": ("Flow Duration", 1e-6),
+        "src_packets": ("Total Fwd Packet", 1.0),
+        "dst_packets": ("Total Bwd packets", 1.0),
+        "src_bytes": ("Total Length of Fwd Packet", 1.0),
+        "dst_bytes": ("Total Length of Bwd Packet", 1.0),
+        "src_packet_mean": ("Fwd Packet Length Mean", 1.0),
+        "dst_packet_mean": ("Bwd Packet Length Mean", 1.0),
+        "src_interarrival_ms": ("Fwd IAT Mean", 1e-3),
+        "dst_interarrival_ms": ("Bwd IAT Mean", 1e-3),
+    },
     "unsw_nb15": {
         "duration_s": ("dur", 1.0),
         "src_packets": ("spkts", 1.0),
@@ -82,7 +95,7 @@ SHARED_FEATURES = {
 }
 
 
-SOURCE_PATTERNS = {"cicids2017": "*.csv", "unsw_nb15": "UNSW_NB15_*-set.csv"}
+SOURCE_PATTERNS = {"cicids2017": "*.csv", "unsw_nb15": "UNSW_NB15_*-set.csv", "cicids2017_improved": "*day.csv"}
 
 
 def _csv_files(directory: str | Path, pattern: str = "*.csv") -> list[Path]:
@@ -223,10 +236,23 @@ def locate_data(root: str | Path) -> dict[str, Path]:
             if not (folder / name).exists():
                 raise ValueError(f"{folder} is missing {name}")
         found["unsw_nb15"] = folder
+
+    from aegis.data.improved import DAY_FILES  # Improved CICIDS2017: five day files, all required.
+    improved = {p.parent for p in root.rglob("monday.csv")}
+    if len(improved) > 1:
+        raise ValueError(f"Several improved CICIDS2017 folders under {root}: {sorted(map(str, improved))}")
+    if improved:
+        folder = next(iter(improved))
+        absent = [name for name in DAY_FILES if not (folder / name).exists()]
+        if absent:
+            raise ValueError(f"{folder} is missing {absent}")
+        found["cicids2017_improved"] = folder
     return found
 
 
 def load_dataset(config: DatasetConfig) -> Dataset:
+    if config.kind == "cse_cic_ids2018":
+        raise PermissionError("External test sets load only through aegis.data.external.guarded_load")
     if config.kind == "synthetic":
         return generate_synthetic(config.name or "synthetic", config.seed)
     if config.path is None:
@@ -235,6 +261,9 @@ def load_dataset(config: DatasetConfig) -> Dataset:
         return load_cicids2017(config.path, config.drop_columns)
     if config.kind == "unsw_nb15":
         return load_unsw_nb15(config.path, config.drop_columns)
+    if config.kind == "cicids2017_improved":
+        from aegis.data.improved import load_cicids2017_improved
+        return load_cicids2017_improved(config.path, config.drop_columns)
     raise ValueError(f"Unknown dataset kind: {config.kind}")
 
 
