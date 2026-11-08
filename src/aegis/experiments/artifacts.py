@@ -63,6 +63,10 @@ NUMERIC_MARKER_COLUMNS = CICIDS_WINDOW
 # It still separates families strongly, so the treatments test what the model takes from it.
 CATEGORICAL_MARKER = "-"
 CATEGORICAL_MARKER_COLUMNS = ("service",)
+# Columns the fixed CICFlowMeter of the improved releases adds or redefines (pre-registration section 6.2).
+CICIDS_IMPROVED_EXTRACTOR = (
+    "Fwd RST Flags", "Bwd RST Flags", "RST Flag Count", "ICMP Code", "ICMP Type", "Total TCP Flow Time", "Protocol",
+)
 
 
 @dataclass(frozen=True)
@@ -80,6 +84,7 @@ class DatasetProfile:
     numeric_marker_columns: tuple[str, ...] = ()
     categorical_marker_columns: tuple[str, ...] = ()
     context_prefix: str | None = None
+    extractor_features: tuple[str, ...] = ()  # Removed, with the window, by the exploratory treatment.
     strict: bool = False
 
 
@@ -97,6 +102,7 @@ PROFILES = {
         # backward packets and Bwd Init Win Bytes 0), so this treatment neutralizes both.
         numeric_marker=0,
         numeric_marker_columns=CICIDS_IMPROVED_WINDOW,
+        extractor_features=CICIDS_IMPROVED_EXTRACTOR,
         strict=True,
     ),
     "unsw_nb15": DatasetProfile(
@@ -140,6 +146,11 @@ RULE_TREATMENTS = (
     "remove_matching_signatures", "no_tcp_window", "neutralize_missing_markers", "no_context_counts", "all_controls",
 )
 LABEL_SENSITIVITY = "exclude_suspect_benign"
+# Exploratory treatments (pre-registration section 6.2, defined 2026-11-09 after the improved-release audit).
+# They never enter treatment_effects.csv or the rule counts: exploratory_effects.csv reports them, compared
+# with the reference under the same rule and with a named baseline treatment descriptively.
+EXPLORATORY = "no_extractor_features"
+EXPLORATORY_BASELINES = {EXPLORATORY: "no_tcp_window"}
 
 
 @dataclass(frozen=True)
@@ -203,6 +214,7 @@ def treatments_for(ds: Dataset, has_suspect_benign: bool = False) -> list[Treatm
     if prefix and profile.strict and not context:
         raise ValueError(f"{ds.name} has no {prefix}* columns needed for no_context_counts")
     marker = profile.numeric_marker
+    extractor = _present(ds, profile, profile.extractor_features, EXPLORATORY)
 
     plan = [Treatment(REFERENCE), Treatment("remove_matching_signatures", remove_signatures=True)]
     if window:
@@ -231,6 +243,8 @@ def treatments_for(ds: Dataset, has_suspect_benign: bool = False) -> list[Treatm
             marker=marker,
         )
     )
+    if extractor:
+        plan.append(Treatment(EXPLORATORY, drop=(*window, *extractor)))
     return plan
 
 
@@ -450,6 +464,8 @@ def meets_shortcut_rule(mean_drop: float, ci_low: float) -> bool:
 def _treatment_role(treatment: str) -> str:
     if treatment in RULE_TREATMENTS:
         return "rule"
+    if treatment in EXPLORATORY_BASELINES:
+        return "exploratory"
     return "label_sensitivity" if treatment == LABEL_SENSITIVITY else "diagnostic"
 
 
@@ -459,6 +475,60 @@ def _check_identical_rows(merged: pd.DataFrame, treatment: str) -> None:
     for column in columns:
         if (merged[f"{column}_reference"] != merged[f"{column}_treated"]).any():
             raise ValueError(f"{treatment} was not evaluated on the reference rows ({column})")
+
+
+def _paired_rows(reference: pd.DataFrame, part: pd.DataFrame, treatment: str, samples: int):
+    """Paired per-seed comparison of ``part`` against ``reference`` on identical rows, per family and FPR."""
+    keys = ["dataset", "family", "target_fpr"]
+    merged = reference.merge(part, on=[*keys, "seed"], suffixes=("_reference", "_treated"))
+    _check_identical_rows(merged, treatment)
+    for key, group in merged.groupby(keys, sort=True):
+        row = {**dict(zip(keys, key)), "treatment": treatment}
+        for metric in ("raw_recall", "overlap_excluded_recall", "recall", "auc"):
+            row[f"{metric}_reference"] = float(group[f"{metric}_reference"].mean())
+            row[f"{metric}_treated"] = float(group[f"{metric}_treated"].mean())
+        row.update(
+            paired_comparison(
+                group["raw_recall_reference"].to_numpy(), group["raw_recall_treated"].to_numpy(), samples=samples
+            )
+        )
+        for prefix, metric in (("overlap", "overlap_excluded_recall"), ("dedup", "recall")):
+            secondary = paired_comparison(
+                group[f"{metric}_reference"].to_numpy(), group[f"{metric}_treated"].to_numpy(), samples=samples
+            )
+            row.update({f"{prefix}_{name}": secondary[name] for name in ("mean_diff", "ci_low", "ci_high")})
+        yield key, row
+
+
+def summarize_exploratory(results: pd.DataFrame, samples: int, primary_fpr: float) -> pd.DataFrame:
+    """The exploratory treatments, kept apart from every primary table and count.
+
+    Each is compared with the reference (``comparison`` = ``reference``), where ``exploratory_rule_met``
+    applies the shortcut rule's thresholds without making a shortcut verdict, and descriptively with its
+    baseline treatment (``comparison`` = that treatment's name), where the ``_reference`` columns hold
+    the baseline. ``mean_diff`` is always the comparison minus the exploratory treatment.
+    """
+    summary = []
+    for treatment, baseline in EXPLORATORY_BASELINES.items():
+        part = results[results["treatment"] == treatment]
+        if part.empty:
+            continue
+        for comparison in (REFERENCE, baseline):
+            against = results[results["treatment"] == comparison]
+            if against.empty:
+                raise ValueError(f"{treatment} needs the {comparison} rows for its pre-registered comparison")
+            for key, row in _paired_rows(against, part, treatment, samples):
+                rule = comparison == REFERENCE and bool(np.isclose(key[2], primary_fpr))
+                row.update({
+                    "comparison": comparison,
+                    "role": "exploratory",
+                    "rule_testable": row["raw_recall_reference"] >= SHORTCUT_MIN_DROP,
+                    "exploratory_rule_met": rule and meets_shortcut_rule(row["mean_diff"], row["ci_low"]),
+                    "dedup_exploratory_rule_met": rule and meets_shortcut_rule(
+                        row["dedup_mean_diff"], row["dedup_ci_low"]),
+                })
+                summary.append(row)
+    return pd.DataFrame(summary)
 
 
 def summarize_treatments(results: pd.DataFrame, samples: int, primary_fpr: float) -> pd.DataFrame:
@@ -475,24 +545,11 @@ def summarize_treatments(results: pd.DataFrame, samples: int, primary_fpr: float
     reference = results[results["treatment"] == REFERENCE]
     summary = []
     for treatment, part in results[results["treatment"] != REFERENCE].groupby("treatment"):
-        merged = reference.merge(part, on=[*keys, "seed"], suffixes=("_reference", "_treated"))
-        _check_identical_rows(merged, treatment)
         role = _treatment_role(treatment)
-        for key, group in merged.groupby(keys, sort=True):
-            row = {**dict(zip(keys, key)), "treatment": treatment, "role": role}
-            for metric in ("raw_recall", "overlap_excluded_recall", "recall", "auc"):
-                row[f"{metric}_reference"] = float(group[f"{metric}_reference"].mean())
-                row[f"{metric}_treated"] = float(group[f"{metric}_treated"].mean())
-            row.update(
-                paired_comparison(
-                    group["raw_recall_reference"].to_numpy(), group["raw_recall_treated"].to_numpy(), samples=samples
-                )
-            )
-            for prefix, metric in (("overlap", "overlap_excluded_recall"), ("dedup", "recall")):
-                secondary = paired_comparison(
-                    group[f"{metric}_reference"].to_numpy(), group[f"{metric}_treated"].to_numpy(), samples=samples
-                )
-                row.update({f"{prefix}_{name}": secondary[name] for name in ("mean_diff", "ci_low", "ci_high")})
+        if role == "exploratory":
+            continue  # Reported only in exploratory_effects.csv.
+        for key, row in _paired_rows(reference, part, treatment, samples):
+            row["role"] = role
             applies = role == "rule" and bool(np.isclose(key[2], primary_fpr))
             row["rule_testable"] = row["raw_recall_reference"] >= SHORTCUT_MIN_DROP
             row["shortcut_dependent"] = applies and meets_shortcut_rule(row["mean_diff"], row["ci_low"])
@@ -527,6 +584,8 @@ def rule_report(effects: pd.DataFrame, primary_fpr: float) -> dict:
         "n_shortcut_dependent_overlap_excluded": int(rule["overlap_shortcut_dependent"].sum()),
         "n_shortcut_dependent_dedup": int(rule["dedup_shortcut_dependent"].sum()),
         "treatments_outside_the_rule": sorted(set(primary["treatment"]) - set(rule["treatment"])),
+        "exploratory_treatments_not_counted": sorted(EXPLORATORY_BASELINES),
+        "exploratory_report": "exploratory_effects.csv",
     }
 
 
@@ -536,12 +595,14 @@ def run(
     extra_manifest: dict | None = None,
     log: Callable[[str], None] = print,
     save_scores: bool = False,
+    treatments: tuple[str, ...] | None = None,
 ) -> pd.DataFrame:
     """Run or continue the artifact experiments, then write the combined result files.
 
     With ``save_scores``, each fold also writes ``scores/<dataset>_seed<n>_<treatment>__<family>.npz``:
     the score of every cleaned test row (``test_row`` indexes the cleaned dataset) and every raw entry
     (``raw_entry`` indexes the raw rows, with its flow hash and count), plus the thresholds.
+    ``treatments`` limits the run to these treatments (the reference is always run); every name must apply.
     """
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -571,6 +632,13 @@ def run(
 
     datasets = [p[0] for p in prepared]
     plans = {ds.name: treatments_for(ds, suspects[ds.name] is not None) for ds in datasets}
+    if treatments is not None:
+        wanted = {REFERENCE, *treatments}
+        for name, plan in plans.items():
+            missing = wanted - {t.name for t in plan}
+            if missing:
+                raise ValueError(f"{name} has no treatments {sorted(missing)}")
+            plans[name] = [t for t in plan if t.name in wanted]
     extra = {
         "experiment": "artifact_resistance",
         "evaluation_role": EVALUATION_ROLE,
@@ -620,7 +688,40 @@ def run(
     effects = summarize_treatments(results, config.bootstrap_samples, primary_fpr)
     effects.to_csv(out / "treatment_effects.csv", index=False)
     (out / "shortcut_rule.json").write_text(json.dumps(rule_report(effects, primary_fpr), indent=2), encoding="utf-8")
+    exploratory = summarize_exploratory(results, config.bootstrap_samples, primary_fpr)
+    if not exploratory.empty:
+        exploratory.to_csv(out / "exploratory_effects.csv", index=False)
     return results
+
+
+# Columns that depend on the machine rather than the result.
+_TIMING_COLUMNS = ("fit_seconds",)
+
+
+def check_matches_recorded(results: pd.DataFrame, recorded: pd.DataFrame, treatments: tuple[str, ...]) -> int:
+    """Refuse a rerun whose rows for ``treatments`` differ from a recorded run (pre-registration 6.2).
+
+    Every recorded row of these treatments on the rerun's datasets and seeds must reappear with
+    identical values, apart from timing. Returns the number of rows compared.
+    """
+    keep = recorded["treatment"].isin(treatments) & recorded["dataset"].isin(results["dataset"].unique())
+    expected = recorded[keep & recorded["seed"].isin(results["seed"].unique())]
+    if expected.empty:
+        raise ValueError(f"The recorded run has no {list(treatments)} rows for these datasets and seeds")
+    if set(results["seed"]) != set(recorded.loc[keep, "seed"]):
+        raise ValueError(f"Seeds {sorted(set(results['seed']))} differ from the recorded run's "
+                         f"{sorted(set(recorded.loc[keep, 'seed']))}, so the comparisons would not pair")
+    columns = [c for c in expected.columns if c not in _TIMING_COLUMNS]
+    got = results[results["treatment"].isin(treatments)]
+    if len(got) != len(expected) or set(got.columns) < set(columns):
+        raise ValueError(f"The rerun has {len(got)} rows for {list(treatments)}; the recorded run has {len(expected)}")
+    left = got[columns].sort_values(ROW_KEYS).reset_index(drop=True)
+    right = expected[columns].sort_values(ROW_KEYS).reset_index(drop=True)
+    try:
+        pd.testing.assert_frame_equal(left, right, check_exact=True, check_dtype=False)
+    except AssertionError as error:
+        raise ValueError(f"The rerun does not reproduce the recorded {list(treatments)} rows: {error}") from None
+    return len(left)
 
 
 def main() -> None:

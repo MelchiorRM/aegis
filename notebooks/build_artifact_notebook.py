@@ -39,6 +39,14 @@ that carry several attack families, and deduplicated rows. No label is changed.
 | `no_context_counts` | How much does UNSW-NB15 depend on its `ct_*` counts? |
 | `all_controls` | What remains with signatures, TCP windows and markers all controlled? |
 | `exclude_suspect_benign` | Do the possibly mislabeled benign rows of the original CICIDS2017 release change the result? (Not run on the improved release.) |
+| `no_extractor_features` | **Exploratory** (pre-registration section 6.2): with the TCP window and seven columns the fixed CICFlowMeter adds or redefines removed, how much held-out recall remains? Improved release only; reported apart from every rule count. |
+
+**Two modes** (`MODE` in the settings cell):
+- `exploratory` (default): the pre-registered development run of `no_extractor_features`. Improved CICIDS2017
+  only, seeds 0–4, treatments `reference`, `no_tcp_window` and `no_extractor_features`. The reference and
+  `no_tcp_window` rows must reproduce the recorded audit (`RECORDED_DIR`) exactly, or the notebook stops. The five
+  recorded shortcut verdicts are not re-evaluated.
+- `full`: every treatment on both datasets, as in the recorded audit.
 
 **Before you start:** use the same data folder as the Config A run. Results go to a new folder,
 and this notebook only reads the earlier Config A folder.
@@ -58,6 +66,23 @@ PREVIOUS_DIR = os.environ.get('AEGIS_PREVIOUS_DIR', OUTPUT_DIR.replace('config_a
 if os.path.realpath(OUTPUT_DIR) == os.path.realpath(PREVIOUS_DIR):
     raise ValueError('OUTPUT_DIR must be a new folder, separate from the Config A results')
 print('PREVIOUS   ', PREVIOUS_DIR)
+
+# 'exploratory': the pre-registered development run of no_extractor_features (section 6.2). 'full': every treatment.
+MODE = os.environ.get('AEGIS_MODE', 'exploratory')
+if MODE not in ('exploratory', 'full'):
+    raise ValueError(f'MODE must be exploratory or full, not {MODE!r}')
+EXPLORATORY_TREATMENTS = ('no_tcp_window', 'no_extractor_features')
+# The recorded improved-release audit the exploratory run must reproduce.
+RECORDED_DIR = os.environ.get('AEGIS_RECORDED_DIR', OUTPUT_DIR)
+if MODE == 'exploratory':
+    OUTPUT_DIR = os.environ.get('AEGIS_EXPLORATORY_DIR', OUTPUT_DIR.replace('config_a_artifacts', 'config_a_exploratory'))
+    if os.path.realpath(OUTPUT_DIR) == os.path.realpath(RECORDED_DIR):
+        raise ValueError('OUTPUT_DIR must be a new folder, separate from the recorded audit')
+    print('MODE        exploratory: improved CICIDS2017, treatments', EXPLORATORY_TREATMENTS)
+    print('RECORDED   ', RECORDED_DIR)
+    print('OUTPUT_DIR ', OUTPUT_DIR)
+else:
+    print('MODE        full')
 """
 
 CHECK = """\
@@ -76,12 +101,38 @@ with tempfile.TemporaryDirectory() as folder:
 print('Pipeline check passed on generated data. These numbers say nothing about real traffic.')
 """
 
+RESTRICT = """\
+from dataclasses import replace
+
+if MODE == 'exploratory':
+    config = replace(config, datasets=tuple(d for d in config.datasets if d.kind == 'cicids2017_improved'))
+    recorded_results = os.path.join(RECORDED_DIR, 'results.csv')
+    if not os.path.exists(recorded_results):
+        raise FileNotFoundError(f'The exploratory run must reproduce the recorded audit; put its results.csv in {RECORDED_DIR}')
+    if list(config.seeds) != [0, 1, 2, 3, 4]:
+        print('NOTE: the pre-registered development run uses seeds 0-4; these seeds are for testing only:', config.seeds)
+print('Datasets:', [d.kind for d in config.datasets], 'seeds:', list(config.seeds))
+"""
+
 RUN = """\
 import time
 
 started = time.time()
-results = run_artifacts(config, OUTPUT_DIR, extra_manifest={'source_version': SOURCE_VERSION})
+results = run_artifacts(config, OUTPUT_DIR, extra_manifest={'source_version': SOURCE_VERSION, 'mode': MODE},
+                        treatments=EXPLORATORY_TREATMENTS if MODE == 'exploratory' else None)
 print(f'Finished in {(time.time() - started) / 3600:.2f} h this session; {len(results)} result rows')
+"""
+
+REPRODUCE = """\
+import pandas as pd
+from aegis.experiments.artifacts import check_matches_recorded
+
+if MODE == 'exploratory':
+    compared = check_matches_recorded(results, pd.read_csv(os.path.join(RECORDED_DIR, 'results.csv')),
+                                      ('reference', 'no_tcp_window'))
+    print(f'Reproduced the recorded audit exactly: {compared} reference and no_tcp_window rows.')
+else:
+    print('Full mode: no recorded run to reproduce.')
 """
 
 COMPARE = """\
@@ -110,80 +161,104 @@ else:
 """
 
 TABLES = """\
+if MODE == 'full':
+    pd.set_option('display.max_rows', 300, 'display.width', 200, 'display.max_columns', 40)
+    primary_fpr = config.target_fprs[0]
+    main = results[results['target_fpr'] == primary_fpr]
+    reference = main[main['treatment'] == 'reference']
+    effects = pd.read_csv(f'{OUTPUT_DIR}/treatment_effects.csv')
+    effects = effects[effects['target_fpr'] == primary_fpr]
+    with open(f'{OUTPUT_DIR}/shortcut_rule.json', encoding='utf-8') as handle:
+        rule = json.load(handle)
+    EFFECT_COLUMNS = ['dataset', 'family', 'treatment', 'raw_recall_reference', 'raw_recall_treated', 'mean_diff',
+                      'ci_low', 'ci_high', 'rule_testable', 'shortcut_dependent']
+
+
+    def show_effects(title, treatments, family=None):
+        # mean_diff is reference minus treated raw recall, so a negative value is recall gained.
+        print(title)
+        table = effects[effects['treatment'].isin(treatments)]
+        if family is not None:
+            table = table[table['family'] == family]
+        display(table[EFFECT_COLUMNS].round(3))
+
+
+    print('This is a sensitivity audit, not an unbiased generalization estimate.')
+    show_effects('1. Web attack recall after signature removal', ['remove_matching_signatures'], 'web_attack')
+
+    print('2. PortScan on raw published rows, reference treatment')
+    display(reference[reference['family'] == 'portscan'].groupby('dataset')[
+        ['raw_recall', 'recall', 'raw_recall_at_oracle_fpr', 'raw_fpr', 'raw_distinct_recall',
+         'raw_conflicting_share', 'raw_attack_rows']].mean().round(3))
+
+    show_effects('3. Sensitivity to TCP window features', ['no_tcp_window'])
+    show_effects('4. Signal through markers (missingness_only sees nothing else)',
+                 ['neutralize_missing_markers', 'missingness_only'])
+    print('4b. UNSW-NB15 service: kept with its catch-all value, removed, or reduced to one flag')
+    service = main[(main['dataset'] == 'unsw_nb15')
+                   & main['treatment'].isin(['reference', 'neutralize_missing_markers', 'service_marker_only'])]
+    display(service.pivot_table(index='family', columns='treatment', values='raw_recall').round(3))
+    show_effects('5. Removing ct_* context counts', ['no_context_counts'])
+    show_effects('6. all_controls across unseen attack families', ['all_controls'])
+
+    print('7. Possibly mislabeled benign rows: original labels are primary, and this run excludes them')
+    print('Attack rows are identical to the reference. Benign rows differ by design, so raw_fpr is shown too.')
+    suspect = effects[effects['treatment'] == 'exclude_suspect_benign']
+    display(suspect[['dataset', 'family', 'raw_recall_reference', 'raw_recall_treated', 'mean_diff', 'ci_low', 'ci_high']].round(3))
+    # The suspect rows are listed for the original CICIDS2017 release only, so other datasets have no such run.
+    if suspect.empty:
+        print('No dataset in this run has a suspect benign list, so this check was skipped.')
+    else:
+        display(main[main['treatment'].isin(['reference', 'exclude_suspect_benign'])
+                     & main['dataset'].isin(suspect['dataset'].unique())].pivot_table(
+            index=['dataset', 'family'], columns='treatment', values=['raw_fpr', 'raw_benign_rows']).round(4))
+
+    print('8. Three evaluation views, reference treatment: raw rows (primary), without attack-label overlaps, deduplicated')
+    display(reference.groupby(['dataset', 'family'])[
+        ['raw_recall', 'overlap_excluded_recall', 'recall', 'raw_attack_overlap_share', 'raw_attack_rows',
+         'overlap_excluded_attack_rows', 'raw_fpr', 'overlap_excluded_fpr', 'raw_conflicting_share']
+    ].mean().round(3))
+    print('Recall by whether a test flow matches a training attack apart from timing, reference treatment')
+    display(reference.groupby(['dataset', 'family'])[
+        ['signature_matched_rows', 'n_attack', 'recall_signature_matched', 'recall_signature_unmatched']].mean().round(3))
+
+    print('Shortcut-dependent results: mean paired raw-recall drop of at least 0.10, with the 95% interval above zero')
+    display(effects[effects['shortcut_dependent']][EFFECT_COLUMNS].round(3))
+    print(f"Comparisons under the rule: {rule['n_comparisons']} {rule['n_comparisons_by_dataset']}, with no "
+          f"multiple-comparison correction. {rule['n_shortcut_dependent']} flagged.")
+    print(f"{rule['n_not_testable']} comparisons cannot trigger the rule, because reference recall is already under 0.10:")
+    display(effects[(effects['role'] == 'rule') & ~effects['rule_testable']][['dataset', 'family', 'treatment', 'raw_recall_reference']].round(3))
+    print('Flagged without attack-label overlaps (secondary):')
+    display(effects[effects['overlap_shortcut_dependent']][
+        ['dataset', 'family', 'treatment', 'overlap_excluded_recall_reference', 'overlap_excluded_recall_treated',
+         'overlap_mean_diff', 'overlap_ci_low', 'overlap_ci_high']].round(3))
+    print('Flagged on deduplicated rows instead (secondary):')
+    display(effects[effects['dedup_shortcut_dependent']][
+        ['dataset', 'family', 'treatment', 'recall_reference', 'recall_treated', 'dedup_mean_diff', 'dedup_ci_low', 'dedup_ci_high']].round(3))
+    print('With five seeds the paired test cannot reach p < 0.05. Read the intervals and effect sizes.')
+"""
+
+EXPLORATORY_TABLES = """\
+import json
 pd.set_option('display.max_rows', 300, 'display.width', 200, 'display.max_columns', 40)
-primary_fpr = config.target_fprs[0]
-main = results[results['target_fpr'] == primary_fpr]
-reference = main[main['treatment'] == 'reference']
-effects = pd.read_csv(f'{OUTPUT_DIR}/treatment_effects.csv')
-effects = effects[effects['target_fpr'] == primary_fpr]
-with open(f'{OUTPUT_DIR}/shortcut_rule.json', encoding='utf-8') as handle:
-    rule = json.load(handle)
-EFFECT_COLUMNS = ['dataset', 'family', 'treatment', 'raw_recall_reference', 'raw_recall_treated', 'mean_diff',
-                  'ci_low', 'ci_high', 'rule_testable', 'shortcut_dependent']
-
-
-def show_effects(title, treatments, family=None):
-    # mean_diff is reference minus treated raw recall, so a negative value is recall gained.
-    print(title)
-    table = effects[effects['treatment'].isin(treatments)]
-    if family is not None:
-        table = table[table['family'] == family]
-    display(table[EFFECT_COLUMNS].round(3))
-
-
-print('This is a sensitivity audit, not an unbiased generalization estimate.')
-show_effects('1. Web attack recall after signature removal', ['remove_matching_signatures'], 'web_attack')
-
-print('2. PortScan on raw published rows, reference treatment')
-display(reference[reference['family'] == 'portscan'].groupby('dataset')[
-    ['raw_recall', 'recall', 'raw_recall_at_oracle_fpr', 'raw_fpr', 'raw_distinct_recall',
-     'raw_conflicting_share', 'raw_attack_rows']].mean().round(3))
-
-show_effects('3. Sensitivity to TCP window features', ['no_tcp_window'])
-show_effects('4. Signal through markers (missingness_only sees nothing else)',
-             ['neutralize_missing_markers', 'missingness_only'])
-print('4b. UNSW-NB15 service: kept with its catch-all value, removed, or reduced to one flag')
-service = main[(main['dataset'] == 'unsw_nb15')
-               & main['treatment'].isin(['reference', 'neutralize_missing_markers', 'service_marker_only'])]
-display(service.pivot_table(index='family', columns='treatment', values='raw_recall').round(3))
-show_effects('5. Removing ct_* context counts', ['no_context_counts'])
-show_effects('6. all_controls across unseen attack families', ['all_controls'])
-
-print('7. Possibly mislabeled benign rows: original labels are primary, and this run excludes them')
-print('Attack rows are identical to the reference. Benign rows differ by design, so raw_fpr is shown too.')
-suspect = effects[effects['treatment'] == 'exclude_suspect_benign']
-display(suspect[['dataset', 'family', 'raw_recall_reference', 'raw_recall_treated', 'mean_diff', 'ci_low', 'ci_high']].round(3))
-# The suspect rows are listed for the original CICIDS2017 release only, so other datasets have no such run.
-if suspect.empty:
-    print('No dataset in this run has a suspect benign list, so this check was skipped.')
+path = f'{OUTPUT_DIR}/exploratory_effects.csv'
+if os.path.exists(path):
+    print('EXPLORATORY (pre-registration 6.2). Not part of any shortcut count or verdict.')
+    print('A drop means dependence on extractor-specific features, not proof of an artifact.')
+    explore = pd.read_csv(path)
+    explore = explore[explore['target_fpr'] == config.target_fprs[0]]
+    columns = ['dataset', 'family', 'comparison', 'raw_recall_reference', 'raw_recall_treated', 'mean_diff', 'ci_low',
+               'ci_high', 'exploratory_rule_met', 'dedup_mean_diff', 'dedup_ci_low', 'dedup_ci_high']
+    print('Against the reference (same rule thresholds, no verdict):')
+    display(explore[explore['comparison'] == 'reference'][columns].round(3))
+    print('Against no_tcp_window (descriptive: the seven extractor columns once the window is gone):')
+    display(explore[explore['comparison'] == 'no_tcp_window'][columns[:8] + columns[9:]].round(3))
+    with open(f'{OUTPUT_DIR}/shortcut_rule.json', encoding='utf-8') as handle:
+        rule = json.load(handle)
+    print('Rule comparisons in this run:', rule['n_comparisons'], '| exploratory treatments not counted:',
+          rule['exploratory_treatments_not_counted'])
 else:
-    display(main[main['treatment'].isin(['reference', 'exclude_suspect_benign'])
-                 & main['dataset'].isin(suspect['dataset'].unique())].pivot_table(
-        index=['dataset', 'family'], columns='treatment', values=['raw_fpr', 'raw_benign_rows']).round(4))
-
-print('8. Three evaluation views, reference treatment: raw rows (primary), without attack-label overlaps, deduplicated')
-display(reference.groupby(['dataset', 'family'])[
-    ['raw_recall', 'overlap_excluded_recall', 'recall', 'raw_attack_overlap_share', 'raw_attack_rows',
-     'overlap_excluded_attack_rows', 'raw_fpr', 'overlap_excluded_fpr', 'raw_conflicting_share']
-].mean().round(3))
-print('Recall by whether a test flow matches a training attack apart from timing, reference treatment')
-display(reference.groupby(['dataset', 'family'])[
-    ['signature_matched_rows', 'n_attack', 'recall_signature_matched', 'recall_signature_unmatched']].mean().round(3))
-
-print('Shortcut-dependent results: mean paired raw-recall drop of at least 0.10, with the 95% interval above zero')
-display(effects[effects['shortcut_dependent']][EFFECT_COLUMNS].round(3))
-print(f"Comparisons under the rule: {rule['n_comparisons']} {rule['n_comparisons_by_dataset']}, with no "
-      f"multiple-comparison correction. {rule['n_shortcut_dependent']} flagged.")
-print(f"{rule['n_not_testable']} comparisons cannot trigger the rule, because reference recall is already under 0.10:")
-display(effects[(effects['role'] == 'rule') & ~effects['rule_testable']][['dataset', 'family', 'treatment', 'raw_recall_reference']].round(3))
-print('Flagged without attack-label overlaps (secondary):')
-display(effects[effects['overlap_shortcut_dependent']][
-    ['dataset', 'family', 'treatment', 'overlap_excluded_recall_reference', 'overlap_excluded_recall_treated',
-     'overlap_mean_diff', 'overlap_ci_low', 'overlap_ci_high']].round(3))
-print('Flagged on deduplicated rows instead (secondary):')
-display(effects[effects['dedup_shortcut_dependent']][
-    ['dataset', 'family', 'treatment', 'recall_reference', 'recall_treated', 'dedup_mean_diff', 'dedup_ci_low', 'dedup_ci_high']].round(3))
-print('With five seeds the paired test cannot reach p < 0.05. Read the intervals and effect sizes.')
+    print('No exploratory treatment ran on these datasets.')
 """
 
 PACKAGE = """\
@@ -191,8 +266,9 @@ import zipfile
 
 archive = f'{OUTPUT_DIR}/aegis_artifact_results.zip'
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
-    for name in ('manifest.json', 'results.csv', 'treatment_effects.csv', 'shortcut_rule.json'):
-        bundle.write(f'{OUTPUT_DIR}/{name}', name)
+    for name in ('manifest.json', 'results.csv', 'treatment_effects.csv', 'shortcut_rule.json', 'exploratory_effects.csv'):
+        if os.path.exists(f'{OUTPUT_DIR}/{name}'):
+            bundle.write(f'{OUTPUT_DIR}/{name}', name)
 print('Return this file with the executed notebook:', archive)
 """
 
@@ -211,13 +287,17 @@ def build() -> nbformat.NotebookNode:
             new_code_cell(CHECK),
             new_markdown_cell("## 4. Find the real data"),
             new_code_cell(base.LOCATE),
+            new_code_cell(RESTRICT),
             new_markdown_cell("## 5. Run the experiments\nThis is the long step. A progress line appears after each fold."),
             new_code_cell(RUN),
-            new_markdown_cell("## 6. Compare with Config A"),
+            new_markdown_cell("## 6. Reproduce the recorded audit and compare with Config A"),
+            new_code_cell(REPRODUCE),
             new_code_cell(COMPARE),
             new_markdown_cell("## 7. Results"),
             new_code_cell(TABLES),
-            new_markdown_cell("## 8. Package the results"),
+            new_markdown_cell("## 8. Exploratory treatment"),
+            new_code_cell(EXPLORATORY_TABLES),
+            new_markdown_cell("## 9. Package the results"),
             new_code_cell(PACKAGE),
         ],
         metadata={

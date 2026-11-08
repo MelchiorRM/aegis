@@ -14,9 +14,13 @@ from aegis.config import BaselineConfig, DatasetConfig, RandomForestConfig
 from aegis.data.dataset import Dataset
 from aegis.data.splits import Fold
 from aegis.experiments.artifacts import (
+    EXPLORATORY,
+    EXPLORATORY_BASELINES,
     REFERENCE,
+    RULE_TREATMENTS,
     Treatment,
     build_raw_rows,
+    check_matches_recorded,
     signature_columns,
     evaluate_raw,
     meets_shortcut_rule,
@@ -24,6 +28,7 @@ from aegis.experiments.artifacts import (
     rule_report,
     run,
     signatures,
+    summarize_exploratory,
     summarize_treatments,
     training_rows,
     treated_features,
@@ -262,6 +267,9 @@ IMPROVED_COLUMNS = [
     "Idle Std", "Idle Max", "Idle Min", "ICMP Code", "ICMP Type", "Total TCP Flow Time",
 ]
 IMPROVED_WINDOW = ("FWD Init Win Bytes", "Bwd Init Win Bytes")
+# Pre-registration section 6.2, written out so a change to the treatment fails here.
+IMPROVED_EXTRACTOR = ("Fwd RST Flags", "Bwd RST Flags", "RST Flag Count", "ICMP Code", "ICMP Type",
+                      "Total TCP Flow Time", "Protocol")
 
 
 def frame_with(columns, rows=4, marker_columns=(), marker=-1.0):
@@ -279,11 +287,14 @@ def improved_like(columns=IMPROVED_COLUMNS) -> Dataset:
 
 
 def add_improved_windows(folder: Path, rng: np.random.Generator) -> None:
-    """Give the improved-format notebook fixture the TCP window columns the real release has."""
+    """Give the improved-format notebook fixture the window and extractor columns the real release has."""
     for path in sorted(folder.glob("*day.csv")):
         frame = pd.read_csv(path)
         for column in IMPROVED_WINDOW:
             frame[column] = rng.choice([0, 229, 8192, 65535], len(frame))
+        for column in IMPROVED_EXTRACTOR:
+            if column not in frame:
+                frame[column] = rng.choice([-1, 0, 1, 3], len(frame))
         frame.to_csv(path, index=False)
 
 
@@ -331,7 +342,8 @@ def test_improved_release_uses_its_own_column_names():
     ds = improved_like()
     plan = {t.name: t for t in treatments_for(ds)}
     assert list(plan) == [REFERENCE, "remove_matching_signatures", "no_tcp_window", "neutralize_missing_markers",
-                          "missingness_only", "all_controls"]
+                          "missingness_only", "all_controls", EXPLORATORY]
+    assert plan[EXPLORATORY] == Treatment(EXPLORATORY, drop=(*IMPROVED_WINDOW, *IMPROVED_EXTRACTOR))
     assert plan["no_tcp_window"].drop == IMPROVED_WINDOW
     assert plan["neutralize_missing_markers"].neutralize == IMPROVED_WINDOW
     assert plan["neutralize_missing_markers"].marker == 0
@@ -339,6 +351,63 @@ def test_improved_release_uses_its_own_column_names():
     assert missingness_frame(ds).columns.tolist() == [f"{c}_marker" for c in IMPROVED_WINDOW]
     neutral = treated_features(ds, plan["neutralize_missing_markers"], np.arange(4), missingness_frame(ds))
     assert neutral[list(IMPROVED_WINDOW)].isna().sum().tolist() == [1, 1]
+
+
+def test_no_extractor_features_drops_only_its_nine_columns():
+    ds = improved_like()
+    plan = {t.name: t for t in treatments_for(ds)}
+    treated = treated_features(ds, plan[EXPLORATORY], np.arange(4), missingness_frame(ds))
+    assert set(ds.X.columns) - set(treated.columns) == {*IMPROVED_WINDOW, *IMPROVED_EXTRACTOR}
+    pd.testing.assert_frame_equal(treated, ds.X[list(treated.columns)])  # No row removed, no value rewritten.
+
+
+@pytest.mark.parametrize("missing", IMPROVED_EXTRACTOR)
+def test_improved_release_refuses_an_absent_extractor_column(missing):
+    with pytest.raises(ValueError, match=re.escape(missing)):
+        treatments_for(improved_like([c for c in IMPROVED_COLUMNS if c != missing]))
+
+
+def test_exploratory_treatment_never_enters_the_primary_table_or_counts():
+    assert not set(EXPLORATORY_BASELINES) & set(RULE_TREATMENTS)
+    window = effect_rows("no_tcp_window", [0.9, 0.92, 0.91], [0.85, 0.86, 0.84])
+    extractor = effect_rows(EXPLORATORY, [0.9, 0.92, 0.91], [0.1, 0.12, 0.11])
+    primary_only = summarize_treatments(window, 100, 0.01)
+    results = pd.concat([window, extractor[extractor.treatment != REFERENCE]])
+    effects = summarize_treatments(results, 100, 0.01)
+    pd.testing.assert_frame_equal(effects, primary_only)  # The exploratory rows change nothing here.
+    assert rule_report(effects, 0.01)["exploratory_treatments_not_counted"] == [EXPLORATORY]
+    assert rule_report(effects, 0.01)["n_comparisons"] == 1
+
+    explore = summarize_exploratory(results, 100, 0.01).set_index("comparison")
+    assert set(explore["role"]) == {"exploratory"} and "shortcut_dependent" not in explore
+    assert explore.loc[REFERENCE, "exploratory_rule_met"]
+    assert explore.loc["no_tcp_window", "raw_recall_reference"] == pytest.approx(0.85)  # The baseline's recall.
+    assert explore.loc["no_tcp_window", "mean_diff"] == pytest.approx(0.74)
+    assert not explore.loc["no_tcp_window", "exploratory_rule_met"]  # Descriptive only.
+    assert summarize_exploratory(window, 100, 0.01).empty
+    with pytest.raises(ValueError, match="no_tcp_window"):
+        summarize_exploratory(extractor, 100, 0.01)
+
+
+def test_rerun_must_reproduce_the_recorded_rows():
+    recorded = pd.concat([effect_rows("no_tcp_window", [0.8, 0.7], [0.5, 0.4]).assign(fit_seconds=1.0),
+                          effect_rows("other", [0.8, 0.7], [0.1, 0.1]).assign(fit_seconds=1.0)])
+    recorded = recorded.drop_duplicates(["seed", "treatment"])
+    rerun = recorded[recorded.treatment != "other"].assign(fit_seconds=9.0)
+    assert check_matches_recorded(rerun, recorded, (REFERENCE, "no_tcp_window")) == 4
+    changed = rerun.copy()
+    changed.loc[changed.index[0], "raw_recall"] += 1e-12
+    with pytest.raises(ValueError, match="does not reproduce"):
+        check_matches_recorded(changed, recorded, (REFERENCE, "no_tcp_window"))
+    with pytest.raises(ValueError, match="Seeds"):
+        check_matches_recorded(rerun[rerun.seed == 0], recorded, (REFERENCE, "no_tcp_window"))
+
+
+def test_run_can_be_limited_to_named_treatments(tmp_path):
+    results = run(small_config(), tmp_path / "a", log=lambda message: None, treatments=("all_controls",))
+    assert set(results["treatment"]) == {REFERENCE, "all_controls"}
+    with pytest.raises(ValueError, match=EXPLORATORY):
+        run(small_config(), tmp_path / "b", log=lambda message: None, treatments=(EXPLORATORY,))
 
 
 def test_improved_signatures_leave_out_timing_only():
@@ -471,6 +540,7 @@ def test_notebook_uses_a_new_folder_and_runs_on_small_csv_files(tmp_path, monkey
     monkeypatch.setenv("AEGIS_DATA_ROOT", str(tmp_path / "data"))
     monkeypatch.setenv("AEGIS_OUTPUT_DIR", str(output))
     monkeypatch.setenv("AEGIS_SEEDS", "0,1")
+    monkeypatch.setenv("AEGIS_MODE", "full")
 
     notebook = nbformat.read(NOTEBOOK, as_version=4)
     assert all(not cell.get("outputs") for cell in notebook.cells if cell.cell_type == "code")
@@ -484,13 +554,36 @@ def test_notebook_uses_a_new_folder_and_runs_on_small_csv_files(tmp_path, monkey
     assert "No Config A results found" in text
     assert "Shortcut-dependent results" in text
     with zipfile.ZipFile(output / "aegis_artifact_results.zip") as bundle:
-        assert set(bundle.namelist()) == {"manifest.json", "results.csv", "treatment_effects.csv", "shortcut_rule.json"}
+        assert set(bundle.namelist()) == {"manifest.json", "results.csv", "treatment_effects.csv", "shortcut_rule.json",
+                                          "exploratory_effects.csv"}
     results = pd.read_csv(output / "results.csv")
     assert {"neutralize_missing_markers", "missingness_only", "service_marker_only"} <= set(results["treatment"])
     improved = set(results.loc[results["dataset"] == "cicids2017_improved", "treatment"])
     assert {"no_tcp_window", "neutralize_missing_markers"} <= improved
     assert "not an unbiased generalization estimate" in text
     assert set(results["seed"]) == {0, 1}
+    assert EXPLORATORY not in set(pd.read_csv(output / "treatment_effects.csv")["treatment"])
+
+    # The exploratory mode reproduces the full run's reference and no_tcp_window rows, then adds only its treatment.
+    exploratory = tmp_path / "results" / "config_a_exploratory"
+    monkeypatch.setenv("AEGIS_MODE", "exploratory")
+    monkeypatch.setenv("AEGIS_RECORDED_DIR", str(output))
+    monkeypatch.setenv("AEGIS_EXPLORATORY_DIR", str(exploratory))
+    notebook = nbformat.read(NOTEBOOK, as_version=4)
+    NotebookClient(
+        notebook, timeout=900, kernel_name="python3", resources={"metadata": {"path": str(tmp_path)}}
+    ).execute()
+    text = "\n".join(
+        str(out.get("text", "")) for cell in notebook.cells if cell.cell_type == "code" for out in cell.outputs
+    )
+    assert "Reproduced the recorded audit exactly: 16 reference and no_tcp_window rows" in text
+    assert "EXPLORATORY (pre-registration 6.2)" in text
+    rerun = pd.read_csv(exploratory / "results.csv")
+    assert set(rerun["dataset"]) == {"cicids2017_improved"}
+    assert set(rerun["treatment"]) == {REFERENCE, "no_tcp_window", EXPLORATORY}
+    assert json.loads((exploratory / "shortcut_rule.json").read_text(encoding="utf-8"))["n_comparisons_by_treatment"] == {
+        "no_tcp_window": 2}
+    assert set(pd.read_csv(exploratory / "exploratory_effects.csv")["comparison"]) == {REFERENCE, "no_tcp_window"}
 
 
 def test_notebook_comparison_reads_earlier_results_without_changing_them(tmp_path, capsys):
