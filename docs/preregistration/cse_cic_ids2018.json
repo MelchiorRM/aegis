@@ -1,0 +1,81 @@
+{
+  "status": "registered",
+  "dataset": "cse_cic_ids2018",
+  "release": "improved (Liu, Engelen et al., IEEE CNS 2022), CSECICIDS2018_improved.zip from https://intrusion-detection.distrinet-research.be/CNS2022/Datasets/",
+  "frozen_config_a": "72166b4d433f5b87",
+  "registered_utc": "2026-11-08T17:07:51Z",
+  "registered_by": "MelchiorRM",
+  "plan": "docs/preregistration/cse_cic_ids2018.md",
+  "attempted_handling": "Labels ending ' - Attempted' (Attempted Category 0-6) are never trained on and are excluded from every primary metric; a secondary metric counts them as benign, pooled without weighting.",
+  "inspection_allowed": "Before evaluation: file names, sizes, checksums, headers, total row counts, and counts per label and Attempted Category. Schema, unit and label checks run as automated assertions that print only pass or fail. No feature values, scores or rows.",
+  "primary_metric": "Raw-view recall on each evaluated 2018 family at the threshold set from development validation benign at 1% target FPR, for Config A trained on improved CICIDS2017 with and without the family; realized 2018 FPR reported.",
+  "evaluation_views": [
+    "raw (primary)",
+    "overlap-excluded",
+    "deduplicated"
+  ],
+  "families": "Held out in development (>= 200 cleaned rows: bot, brute_force, dos, portscan) and >= 200 cleaned non-Attempted 2018 rows; label mapping in the plan, section 3.",
+  "comparisons": [
+    "Config A seen vs held-out recall per family",
+    "Config A shortcut treatments",
+    "development vs external held-out recall (descriptive)",
+    "B vs A, C vs B, D vs C, E vs D once frozen and added by amendment"
+  ],
+  "shortcut_rule": "Applies to primary_treatments only: shortcut-dependent if the mean per-seed raw-recall drop (reference minus treated) at 1% target FPR is >= 0.10 and its 95% bootstrap interval lies above zero; same rule reported in the overlap-excluded and deduplicated views; not testable if reference raw recall < 0.10; all comparisons counted, no correction.",
+  "opening": "DECIDED 2026-11-09: opened once, at Phase 5, after every configuration, preprocessing, threshold, seed, metric and analysis procedure is frozen and recorded by amendment (plan section 9). Until then: no download, inspection or analysis of the 2018 data, and no use of its results for any decision.",
+  "exploratory_treatments": {
+    "no_extractor_features": {
+      "drops": [
+        "FWD Init Win Bytes",
+        "Bwd Init Win Bytes",
+        "Fwd RST Flags",
+        "Bwd RST Flags",
+        "RST Flag Count",
+        "ICMP Code",
+        "ICMP Type",
+        "Total TCP Flow Time",
+        "Protocol"
+      ],
+      "compared_to": [
+        "reference: same rule, statistics and views; reported in a separate table",
+        "no_tcp_window: descriptive paired drop and interval only"
+      ],
+      "status": "exploratory; defined 2026-11-09 after the development audit; role 'exploratory' in code with primary verdict columns always false; not in n_comparisons or n_shortcut_dependent; changes no verdict in 6.1 or 6.3",
+      "plan_section": "6.2",
+      "development_run": "after registration, before opening; seeds 0-4; recomputed reference and no_tcp_window rows must equal the recorded ones; reported as post hoc",
+      "interpretation": "a drop is reported as dependence on extractor-specific features, not proof of an artifact"
+    }
+  },
+  "development_findings": "Fixed before registration (plan 6.3): bot shortcut-dependent under no_tcp_window, neutralize_missing_markers, all_controls; portscan under no_tcp_window, all_controls; brute_force and dos not dependent. Unresolved: development bot recall depends on portscan in training.",
+  "seeds": {
+    "external": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "pairing": "every paired comparison (seen vs held-out, reference vs treatment, configuration vs configuration) uses the same seed set on both sides",
+    "development_exploratory_run": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "primary_treatments": [
+    "remove_matching_signatures",
+    "no_tcp_window",
+    "neutralize_missing_markers",
+    "all_controls"
+  ],
+  "outside_the_rule": [
+    "missingness_only"
+  ]
+}
