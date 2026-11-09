@@ -445,6 +445,9 @@ recall at 1% target FPR, with 95% bootstrap intervals:
 | 5 | Determinism rerun: A, B and B0 outer folds, all seeds | 13.0 | 147.7 |
 | 6 | Perturbation arm (exploratory), outer folds | 4.5 | **152.2** |
 
+- **Measured update (2026-11-10):** stage 0 was measured at 3.24 CPU-h for the 250 planned episodes, not 2.7. The
+  approved plan total is therefore 152.7 CPU-h, still inside the 153 planning ceiling (`docs/config-b-evidence.md`,
+  issue 25).
 - **Margin:** 27.8 CPU-h (15%) below the budget, inside the planning ceiling. Wall time is about 19 hours on 8
   cores.
 - **UNSW-NB15:** if nothing is mapped there at the freeze, B and B0 equal A, and their UNSW-NB15 fits are not run.
