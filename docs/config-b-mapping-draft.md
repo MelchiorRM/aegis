@@ -1,4 +1,50 @@
-# Config B action-to-family mapping — DRAFT, revision 2, for owner review
+# Config B action-to-family mapping — revision 3 (final mapping approved, not yet frozen)
+
+## Final mapping (owner, 2026-11-10)
+**Improved CICIDS2017, a two-family intervention:**
+
+| Concrete action | Family | Confidence | Evidence |
+|---|---|---|---|
+| `SSHBruteForce` | `brute_force` | High | Same technique (password guessing, T1110.001) and protocol as SSH-Patator |
+| `AggressiveServiceDiscovery` | `portscan` | High | Same technique and protocol as the nmap port scans |
+| `StealthServiceDiscovery` | `portscan` | Medium-high | Same modelled traffic; whether CIC ran slow scans is unverified |
+
+**Rejected, unmapped or excluded:**
+- **`SQLInjection` → `web_attack`: rejected.** E4 found only 9 SQL-injection rows among the 62 `web_attack` training
+  rows (seed 0). That is below the floor of 20 fixed before the run, and the other 53 rows are web brute force and
+  XSS, different behaviours. The threshold is not lowered, and no replacement mapping is invented.
+- **`HTTPRFI`: unmapped.** No taxonomy support (E1).
+- **UNSW-NB15: every entry unmapped.** E1 found no taxonomy support, and E2 is descriptive only. So B = B0 = A on
+  UNSW-NB15, and Config B's intervention and its primary comparison are limited to improved CICIDS2017. That
+  **cannot be presented as cross-dataset validation.**
+- **All other entries:** unmapped or excluded, as in section 3.
+
+**Family weights**, from the scenario bank under the unchanged rule:
+
+| Fold seed | `brute_force` | `portscan` |
+|---|---|---|
+| 0 | 37.21% | 62.79% |
+| 1 | 37.14% | 62.86% |
+| 2 | 37.72% | 62.28% |
+| 3 | 37.82% | 62.18% |
+| 4 | 37.49% | 62.51% |
+
+- **Where they come from:** 50 episodes per fold seed, blue `Sleep`
+  (`spikes/config_b_evidence/scenario_bank_manifest.json`).
+- **Held-out folds:** when `brute_force` or `portscan` is held out, the other gets all of B's replay.
+
+**What the scenario is, and is not:**
+- **Mapped actions are a small share** of red actions: 11.4% with the then-candidate `SQLInjection`, and 10.8% under
+  the final mapping.
+- **Local actions dominate:** `Impact` and `DegradeServices` make up 61%.
+- **The weights barely vary across fold seeds.**
+- **It describes** CAGE 4's scripted red behaviour against a sleeping blue. It is not a representative real-world
+  attacker population, and not an independent validation set.
+
+Sections 1–6 below are the revision-2 draft, kept for the record. Where they differ from this section, this section
+governs.
+
+# Revision 2 draft (record)
 
 **Status: draft, not frozen, not used.** Revision 2 stands, with the owner's 2026-11-09 approvals recorded in section 5.
 - **History:** revision 1 was drafted on 2026-11-09. Revision 2 (also 2026-11-09) applies the owner's decisions on
@@ -53,7 +99,7 @@ Seed-0 counts are attempts executed (successful).
 |---|---|---|---|---|---|---|---|
 | **`SSHBruteForce`**. Seed 0: 52 (52) | SSH, TCP 22 | CICIDS2017 `brute_force` | The family is SSH-Patator and FTP-Patator runs, automated password guessing against a login service (ATT&CK T1110.001). `SSHBruteForce` is password guessing against SSH. Replay is family-level, so FTP-Patator rows are replayed too: same technique, another service. | Yes: repeated TCP sessions to port 22, whatever the outcome | O2, O3 | High | **Approved** |
 | | | UNSW-NB15: none | No credential-guessing family. | Yes | — | — | **Unmapped** (owner) |
-| **`SQLInjection`**. Seed 0: 6 (6) | Database process on TCP 3390, selectable only when the host also serves 80 or 443: injection through a web front end | CICIDS2017 `web_attack` | **A broad family-level match, not an exact attack equivalence.** The family pools three CIC web-application attacks run over HTTP: web brute force, XSS and SQL injection. One of the three is the same technique. What is replayed is the whole family, of which SQL injection is only a part (E4 counts that part). CAGE's port 3390 is a modelling artifact, not evidence. | Yes: HTTP requests to the web front end | O2, O3 | Medium-high | **Approved, broad family-level match** |
+| **`SQLInjection`** (**rejected 2026-11-10**, see Final mapping). Seed 0: 6 (6) | Database process on TCP 3390, selectable only when the host also serves 80 or 443: injection through a web front end | CICIDS2017 `web_attack` | **A broad family-level match, not an exact attack equivalence.** The family pools three CIC web-application attacks run over HTTP: web brute force, XSS and SQL injection. One of the three is the same technique. What is replayed is the whole family, of which SQL injection is only a part (E4 counts that part). CAGE's port 3390 is a modelling artifact, not evidence. | Yes: HTTP requests to the web front end | O2, O3 | Medium-high | **Approved, broad family-level match** |
 | | | UNSW-NB15 `exploits` | The documented definition, leveraging a known software vulnerability, is broad. Support needs evidence from the dataset's actual taxonomy (E1) and its observed services (E2). | Yes | O2, O3 | — | **Provisional (E1, E2)** |
 | **`HTTPRFI`**. Seed 0: 11 (0) | Web server with the `rfi` property, HTTP, TCP 80 | CICIDS2017 `web_attack` | The same delivery as the family (injected input in HTTP requests). However, remote file inclusion is not one of the family's documented attacks, and shared membership of the umbrella "web attack" is not enough. It needs E1 to find RFI, or a technique the family documents that RFI is an instance of. **Expected outcome, stated now:** revision 1's summaries list only brute force, XSS and SQL injection, so it is likely to stay unmapped. | Yes, including failed attempts | O3 is the common case | — | **Provisional (E1)** |
 | | | UNSW-NB15 `exploits` | As for `SQLInjection`. | Yes | O2, O3 | — | **Provisional (E1, E2)** |
@@ -73,7 +119,7 @@ Seed-0 counts are attempts executed (successful).
 | **`ExploitRemoteService` with no exploit chosen**. Seed 0: 159 | — | — | O4. | No service reached | O4 | — | **Not counted; reported separately** |
 
 **What is approved now:**
-- **Improved CICIDS2017:** three families receive replay: `brute_force`, `web_attack` (from `SQLInjection` only)
+- **Superseded 2026-11-10 (final mapping: two families).** Improved CICIDS2017: three families receive replay: `brute_force`, `web_attack` (from `SQLInjection` only)
   and `portscan`.
 - **UNSW-NB15:** nothing is mapped. Unless E1 and E2 support a provisional entry, B = A on UNSW-NB15, and the B
   intervention contrasts are limited to improved CICIDS2017. That is not cross-dataset validation.
@@ -123,18 +169,18 @@ Seed-0 counts are attempts executed (successful).
   - events with no mapping (unmapped and O4/O6, reported separately);
   - B's realized total, which B0 matches.
 
-### 4.4 Illustration (approved mappings only; seed-0 events; cleaned counts)
+### 4.4 Illustration (final two-family mapping; fold seed 0 bank weights; cleaned counts)
 | Improved CICIDS2017, held out | r | Requested / realized (truncated) | B replays / training rows | Attack-class ESS: A | B | B0 |
 |---|---|---|---|---|---|---|
-| `bot` | 0.25 | 2,211 / 2,211 (0) | brute_force 804/4,159; portscan 1,314/4,617; web_attack 93/62 | 108,867 | 106,768 | 106,826 |
-| `bot` | 1.0 | 8,838 / 8,715 (web_attack 123) | brute_force 3,214/4,159; portscan 5,253/4,617; web_attack 248/62 | 108,867 | 100,896 | 102,402 |
-| `portscan` | 1.0 | 4,221 / 4,032 (web_attack 189) | brute_force 3,784/4,159; web_attack 248/62 | 104,692 | 100,576 | 101,218 |
-| `dos` | 1.0 | 8,838 / 8,715 (web_attack 123) | as for `bot` | 9,309 | 8,670 | 9,163 |
+| `bot` | 0.25 | 2,194 / 2,194 (0) | brute_force 816/4,159; portscan 1,378/4,617 | 108,867 | 106,840 | 106,841 |
+| `bot` | 1.0 | 8,776 / 8,776 (0) | brute_force 3,266/4,159; portscan 5,510/4,617 | 108,867 | 101,035 | 102,370 |
+| `brute_force` | 1.0 | 4,617 / 4,617 (0) | portscan 4,617/4,617 (only mapped family left) | 105,150 | 101,250 | 101,250 |
+| `dos` | 1.0 | 8,776 / 8,776 (0) | as for `bot` | 9,309 | 8,740 | 9,178 |
+| `portscan` | 1.0 | 4,159 / 4,159 (0) | brute_force 4,159/4,159 (only mapped family left) | 104,692 | 101,124 | 101,124 |
 
-- **The cap binds only on `web_attack`.** It has 62 training rows; with the approved mapping the cap truncates at
-  r = 1, and with `HTTPRFI` added it would truncate from r = 0.25.
-- **`web_attack`'s ESS stays at its 62 distinct rows** throughout.
+- **The cap no longer binds** at any ratio, now that `web_attack` is unmapped. It stays as a guard.
 - **UNSW-NB15:** nothing is mapped, so B = A in every fold.
+- **Full output:** `spikes/config_b_draft/replay_ess.py`.
 
 ## 5. Evidence steps — exact procedures
 **Status (owner, 2026-11-09):**

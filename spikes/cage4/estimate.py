@@ -11,10 +11,16 @@ What the numbers are, and are not:
 
 Revision history:
 - Spike estimate: about 100 CPU-h.
+- 2026-11-10, final plan: stage 0 is the recorded scenario bank (250 episodes, reused; owner approval), measured
+  at 3.24 CPU-h and counted against the budget as already spent. Under the final mapping nothing is mapped on
+  UNSW-NB15, so B = B0 = A there by construction; `--scope cicids` charges Config B's fits on improved
+  CICIDS2017 only, `--scope both` keeps the previously approved scope.
 - 2026-11-09, first plan: 181.6 CPU-h with B0's selection and audit (owner decision). It charged nested selection
   one fit per ORDERED family pair. aegis.experiments.selection fits each UNORDERED pair once and scores it in
   both directions, so selection was counted twice. Corrected below.
 """
+
+import sys
 
 BUDGET_CPU_HOURS = 180.0
 PLANNING_CEILING = 0.85 * BUDGET_CPU_HOURS  # The plan must fit under 153 CPU-h: a 15% safety margin.
@@ -26,9 +32,11 @@ DATASETS = {
     "unsw_nb15": (9, 8, 8, 0.26, 15_271 / 90_000),
 }
 RF_WORKERS = 8
-SIM_EPISODE_SECONDS = 38.5
-SIM_EPISODES_PER_SEED = 50
+SIM_BANK_CPU_HOURS = 11_657.0 / 3600  # Measured (RUSAGE_CHILDREN), results/config_b_evidence/scenarios_run.console.log.
 RATIOS = (0.25, 0.5, 1.0)
+
+
+SCOPE = DATASETS
 
 
 def cpu_ceiling_hours(fits: dict[str, int], ratio: float = 0.0) -> float:
@@ -36,16 +44,16 @@ def cpu_ceiling_hours(fits: dict[str, int], ratio: float = 0.0) -> float:
 
 
 def outer(arms: int = 1) -> dict[str, int]:
-    return {d: arms * SEEDS * v[0] for d, v in DATASETS.items()}
+    return {d: arms * SEEDS * v[0] for d, v in SCOPE.items()}
 
 
 def audit() -> dict[str, int]:
-    return {d: SEEDS * v[1] * v[2] for d, v in DATASETS.items()}
+    return {d: SEEDS * v[1] * v[2] for d, v in SCOPE.items()}
 
 
 def selection_hours(ratios: tuple[float, ...] = RATIOS) -> float:
     # One fit per unordered pair of eligible families, per seed, per candidate ratio.
-    fits = {d: SEEDS * v[1] * (v[1] - 1) // 2 for d, v in DATASETS.items()}
+    fits = {d: SEEDS * v[1] * (v[1] - 1) // 2 for d, v in SCOPE.items()}
     return sum(cpu_ceiling_hours(fits, r) for r in ratios)
 
 
@@ -53,8 +61,7 @@ def plan() -> list[tuple[str, str, float]]:
     top = max(RATIOS)
     arms = cpu_ceiling_hours(outer()) + 2 * cpu_ceiling_hours(outer(), top)
     return [
-        ("0", f"CAGE 4 scenarios ({SIM_EPISODES_PER_SEED} episodes x {SEEDS} seeds, 2 workers)",
-         SIM_EPISODES_PER_SEED * SEEDS * SIM_EPISODE_SECONDS / 3600),
+        ("0", "Scenario bank: 50 episodes x 5 fold seeds, reused (measured, already spent)", SIM_BANK_CPU_HOURS),
         ("1", "Calibration: seed 0 outer folds, A, B, B0 (kept as part of stage 3); CPU time measured", arms / SEEDS),
         ("2a", f"Nested selection of B ({len(RATIOS)} ratios)", selection_hours()),
         ("2b", f"Nested selection of B0 ({len(RATIOS)} ratios, same rule)", selection_hours()),
@@ -68,6 +75,10 @@ def plan() -> list[tuple[str, str, float]]:
 
 
 def main() -> None:
+    global SCOPE
+    scope = sys.argv[sys.argv.index("--scope") + 1] if "--scope" in sys.argv else "cicids"
+    SCOPE = {d: v for d, v in DATASETS.items() if scope == "both" or d == "cicids2017_improved"}
+    print(f"Scope: {scope} ({', '.join(SCOPE)})")
     parts = plan()
     width = max(len(n) for _, n, _ in parts)
     running = 0.0

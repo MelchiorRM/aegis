@@ -4,8 +4,8 @@ Design arithmetic only, for the owner's review. It loads no dataset, fits no mod
 data. Inputs, both illustrations:
 - the cleaned family counts recorded in Config A's manifest (results/config_a_improved_25685b84dd83f65c),
   split as make_partition does (20% test, 20% validation, the rest training) and capped at 100,000 per family;
-- the mapped red-event counts of one spike episode (seed 0, blue Sleep, 500 steps), counted once per executed
-  action under the draft's outcome rules.
+- the mapped red-event counts of fold seed 0's 50 scenario-bank episodes (blue Sleep, 500 steps), counted once
+  per executed action under the outcome rules.
 The experiment computes the same quantities per fold and per seed from its own rows and episodes.
 
 Definitions (docs/config-b-mapping-draft.md, section 4):
@@ -31,15 +31,12 @@ HELD_OUT = {
     "unsw_nb15": ["analysis", "backdoor", "dos", "exploits", "fuzzers", "generic", "reconnaissance", "shellcode"],
 }
 SCENARIOS = {
-    # Approved by the owner on 2026-11-09: SSHBruteForce, SQLInjection, both service discoveries (CICIDS2017 only).
-    "approved only": {
-        "cicids2017_improved": {"brute_force": 52, "web_attack": 6, "portscan": 45 + 40},
+    # Final mapping (owner, 2026-11-10): SSHBruteForce -> brute_force; both service discoveries -> portscan.
+    # SQLInjection -> web_attack rejected (E4: 9 of 62 rows, below the floor of 20); HTTPRFI and UNSW-NB15 unmapped.
+    # Events: fold seed 0's 50 episodes in the scenario bank (results/config_b_evidence/scenarios/).
+    "final (two families, fold seed 0 bank)": {
+        "cicids2017_improved": {"brute_force": 2398, "portscan": 4046},
         "unsw_nb15": {},
-    },
-    # If every provisional entry were later supported (HTTPRFI on both datasets; SQLInjection on UNSW-NB15).
-    "approved + provisional": {
-        "cicids2017_improved": {"brute_force": 52, "web_attack": 6 + 11, "portscan": 45 + 40},
-        "unsw_nb15": {"exploits": 6 + 11},
     },
 }
 RATIOS = (0.25, 0.5, 1.0)
@@ -69,7 +66,7 @@ def allocate(total: int, shares: dict[str, float]) -> dict[str, int]:
 
 
 def main() -> None:
-    print("Illustration only: Config A cleaned counts, one seed-0 episode. Not the experiment's numbers.")
+    print("Illustration only: Config A cleaned counts, fold seed 0 scenario bank. Not the experiment's numbers.")
     for scenario, events in SCENARIOS.items():
         print(f"\n######## {scenario}")
         for dataset, counts in COUNTS.items():

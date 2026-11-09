@@ -1,6 +1,6 @@
 # Config B design (Phase 2) — final revised protocol, for review before pre-registration
 
-**Status:** final revision (revision 4) of 2026-11-09, for review. The owner approved the compute plan, the data-budget rule,
+**Status:** final revision (revision 5) of 2026-11-10, for review. Revision 5 adds the final two-family mapping, the scenario bank and the final compute plan. The owner approved the compute plan, the data-budget rule,
 the B/B0 design (subject to the invariant in 3.2.1) and the evidence procedures. These approvals cover design
 only, not execution. The feasibility spike was accepted earlier (`docs/spikes/cage4-feasibility.md`). The action-to-family mapping is a draft for
 review (`docs/config-b-mapping-draft.md`). **Config B implementation and experiments are not authorized.** No
@@ -38,6 +38,13 @@ closed: Phase 5 is a separate, mandatory opening authorization, and nothing here
     - **Approved:** the outcome rules, and the cap of 4 replays per row (provisionally).
     - **Approved:** the corrected B0 concept.
     - **Compute:** the first compute plan was rejected as over budget.
+  - **Final mapping (owner, 2026-11-10): a two-family intervention on improved CICIDS2017.**
+    - **Approved:** `SSHBruteForce` → `brute_force`; `AggressiveServiceDiscovery` and `StealthServiceDiscovery` →
+      `portscan`.
+    - **Rejected:** `SQLInjection` → `web_attack`. E4 found 9 SQL-injection rows among 62 training rows, below the
+      floor of 20 fixed before the run, and the threshold is not lowered.
+    - **Unmapped:** `HTTPRFI`, and every UNSW-NB15 entry. No replacement mapping is invented.
+    - **Consequence:** B = B0 = A on UNSW-NB15, and the Config B intervention is limited to improved CICIDS2017.
 - **What it can show:** whether **simulator-derived family weighting** of replayed training records (family
   weights from a scripted CAGE 4 scenario's mapped action counts) changes held-out-family recall, at equal
   false-positive rate:
@@ -205,6 +212,53 @@ stated and checked.
 5. **Simulator-to-dataset correspondence is not validated:** nothing checks that a CAGE alert or action
    corresponds to a recorded flow. This is stated as a limitation.
 
+### 2.6 Simulator scenario bank (owner approval 2026-11-10: reuse, not regenerate)
+**What it is:**
+- the 250 episodes already run, recorded as a fixed bank;
+- **50 episodes for each of five fold seeds,** not 250 independent seeds. The simulator seed is
+  1000 × fold seed + episode index.
+- **Record:** `spikes/config_b_evidence/scenario_bank_manifest.json`, built and verified by
+  `spikes/config_b_evidence/scenario_bank.py`.
+- **Bank files:** read-only in `~/aegis-spike/runs/config_b_seeds/`. The original spike artifacts are preserved and
+  read-only, and their checksums are in the manifest.
+
+**Recorded in the manifest:**
+- the CAGE commit (`8c3c50c…`), the lock's checksum, and the configuration:
+  - `EnterpriseScenarioGenerator`, `FiniteStateRedAgent`, `EnterpriseGreenAgent`;
+  - blue `SleepAgent` acting `Sleep`, 500 steps (499 executed);
+  - the probe's checksum, Python 3.12.3, and 2 workers;
+- the seeds, and the episode count (250, all unique, 250 distinct trajectories);
+- every log's SHA-256;
+- action counts recomputed from the checksummed logs and verified equal to the earlier summary.
+
+**Reproducibility, two kinds kept distinct:**
+- **Byte-for-byte:** seed 0's trajectory hash equals the spike's final-probe hash.
+- **Behavioural only:** seeds 2 and 3 match the spike's behavioural counts exactly (red actions, successes, blue
+  events, reward). Their hashes differ because those spike runs predate `sub_action` logging. That is a change in
+  what is logged, not in behaviour.
+
+**What it is not:** an independent validation set, or a real-world attacker population. It describes CAGE 4's
+scripted red agents against a sleeping blue.
+
+**Family weights under the final mapping** (the formula in 2.2, unchanged; `SQLInjection` removed):
+
+| Fold seed | `brute_force` events | `portscan` events | Weight `brute_force` | Weight `portscan` |
+|---|---|---|---|---|
+| 0 | 2,398 | 4,046 | 37.21% | 62.79% |
+| 1 | 2,389 | 4,043 | 37.14% | 62.86% |
+| 2 | 2,417 | 3,991 | 37.72% | 62.28% |
+| 3 | 2,460 | 4,045 | 37.82% | 62.18% |
+| 4 | 2,409 | 4,017 | 37.49% | 62.51% |
+
+**Limitations:**
+1. **Mapped actions are 11.4% of red actions** (33,804 of 297,626, counting the then-candidate `SQLInjection`).
+   Under the final mapping they are 32,215, or 10.8%.
+2. **The scenario is dominated by local actions:** `Impact` and `DegradeServices` make up 61% of red actions.
+   Unreachable exploits make up 12.3%.
+3. **The weights barely vary across fold seeds** (37.1–37.8% for `brute_force`). Seed variation in B comes mostly
+   from the data partition, not the scenario.
+4. **When `brute_force` or `portscan` is held out,** the weights reduce to the one remaining family (3.2).
+
 ### 2.5 Claims the data supports
 - **Supported:** "a Random Forest trained on its fold's training partition, with existing training records
   replayed under family weights derived from a scripted CAGE 4 scenario's action counts, has held-out-family recall
@@ -366,10 +420,13 @@ recall at 1% target FPR, with 95% bootstrap intervals:
 - If B ≈ B0, simulator-derived family weighting adds nothing beyond adding records, and that is the finding.
 - **No contrast says anything about traffic generation, individual flow behaviour, or record realism.** Within a
   family, B and B0 draw records the same way.
-- **Under the approved mappings:**
-  - **Improved CICIDS2017:** B's composition differs from B0's mainly in weight. B weights `brute_force`,
-    `portscan` and `web_attack`; B0 weights, in proportion to size, mostly `dos`, which is about 90% of the seen
-    attack pool when it is not held out.
+- **Under the final mapping (two families, improved CICIDS2017 only):**
+  - **Family weights:** when neither mapped family is held out (the `bot` and `dos` folds), B splits replay
+    between `brute_force` and `portscan` at about 37:63 (2.6). B0 spreads the same total in proportion to size,
+    which is mostly `dos` (about 90% of the seen attack pool) when `dos` is not held out.
+  - **When one mapped family is held out** (the `brute_force` and `portscan` folds), only the other remains. B puts
+    all replay on it, and the simulator's weights carry no information beyond the mapping's choice of family.
+  - **Report per fold:** B − B0 is reported per held-out family. This distinction is stated with the results.
 
 ### 3.3 Data budget and selection
 - **Data budget, revised:**
@@ -394,12 +451,12 @@ recall at 1% target FPR, with 95% bootstrap intervals:
     added total.
   - Outer families are only reported.
 - **Shortcut audit:** applied to B and to B0 with the same treatments and rule.
-- **Datasets:**
-  - **Currently:** under the approved mappings, nothing is mapped on UNSW-NB15, so B = A = B0 there.
-  - **If no UNSW-NB15 entry is justified by E1 and E2 before the freeze:** this is reported honestly, and the
-    Config B intervention contrasts are limited to improved CICIDS2017. That is a single-dataset result, **not
-    cross-dataset validation.**
-  - **Evidence comes first:** UNSW-NB15 entries are never forced to make B active on both datasets.
+- **Datasets (final mapping, owner 2026-11-10):**
+  - **UNSW-NB15:** no entry qualified (E1, E2), so nothing is mapped there, and B = B0 = A on UNSW-NB15 by
+    construction (zero replay).
+  - **Scope:** Config B's intervention, and its primary comparison B − B0, is **limited to improved
+    CICIDS2017.** It is a single-dataset result, and **cannot be presented as cross-dataset validation.**
+  - **No forced mappings:** UNSW-NB15 entries were not forced to make B active on both datasets.
 
 ### 3.4 Not directly comparable
 - **Simulator-level outcomes** (episode reward, time to detect, containment, response cost):
@@ -412,46 +469,57 @@ recall at 1% target FPR, with 95% bootstrap intervals:
 - **Cross-dataset and cross-environment results:** Phase 4.
 - **External results:** Phase 5, through the opening authorization only.
 
-## 3.5 Compute plan, revision 2 (`spikes/cage4/estimate.py`)
-**Budget (owner, 2026-11-09):**
-- at most 180 **measured** CPU-hours;
-- local machine only, no GPU, at most two concurrent simulation workers, no cloud compute.
-- **Planning ceiling:** the plan must fit under 153 CPU-h, a 15% safety margin below the budget.
+## 3.5 Compute plan, final (`spikes/cage4/estimate.py`)
+**Budget (owner, 2026-11-09; reaffirmed 2026-11-10):**
+- at most 180 **measured** CPU-hours, with a hard stop at 180;
+- local machine only, no GPU, at most two concurrent simulation workers, no cloud compute;
+- **planning ceiling:** 153 CPU-h, a 15% margin.
 
-**Why revision 1 was over budget, and what changed:**
-- **Rejected:** revision 1 projected 181.6 CPU-h, and the owner did not approve it.
-- **Counting error:** the estimate charged nested selection one fit per **ordered** pair of families.
-  `aegis.experiments.selection` fits each **unordered** pair once and scores it in both directions, so selection
-  was counted twice. Correcting this, not removing anything, brings the plan under the ceiling.
-- **Nothing removed:** no control, analysis or candidate is removed. Three ratio candidates are kept, and a fresh
-  shortcut audit of A is added.
+**History:**
+- revision 1, 181.6 CPU-h, was rejected;
+- revision 2 corrected the selection count to 152.2 (approved);
+- the measured stage 0 made it 152.7 (accepted 2026-11-10).
 
-**What the numbers are:** Phase 1's measured **wall** minutes per fit (improved CICIDS2017 0.76, UNSW-NB15 0.26, at
-8 workers), multiplied by 8 cores.
-- That is a ceiling, not a measurement: a process on 8 cores cannot use more than 8 CPU-seconds per wall-second.
-- Replayed arms are charged for their largest training set.
-- **Actual CPU consumption is first measured in the calibration stage.**
+**Final changes:**
+1. **Stage 0 is the scenario bank (2.6).** It is reused, not regenerated. Its measured 3.24 CPU-h is counted
+   against the budget as already spent.
+2. **Under the final mapping, B = B0 = A on UNSW-NB15 by construction.** B and B0 add zero replay there, so their
+   training sets equal A's, and their fits would reproduce A's. Two scopes are shown below. **Choosing between
+   them is the owner's decision.** Nothing is removed silently.
 
-| Stage | Work | CPU-h ceiling | Cumulative |
+**How the figures are computed:** wall time × 8 cores, a ceiling, plus the measured bank. Replayed arms are charged
+for their largest training set.
+
+| Stage | Work | Scope A: improved CICIDS2017 only (**recommended**) | Scope B: both datasets (previously approved) |
 |---|---|---|---|
-| 0 | CAGE 4 scenarios: 50 episodes × 5 seeds, 2 workers | 2.7 | 2.7 |
-| 1 | **Calibration:** seed 0 outer folds, A, B and B0. CPU measured. Kept as part of stage 3 | 2.6 | 5.3 |
-| 2a | Nested selection of B (3 ratios, one fit per unordered pair) | 25.3 | 30.6 |
-| 2b | Nested selection of B0 (3 ratios, same rule) | 25.3 | 56.0 |
-| 3 | Outer folds: A, B and B0, seeds 1–4 | 10.4 | 66.4 |
-| 4a | Shortcut audit of B | 23.5 | 89.9 |
-| 4b | Shortcut audit of B0 | 23.5 | 113.5 |
-| 4c | Shortcut audit of A under `25685b84dd83f65c` | 21.2 | 134.7 |
-| 5 | Determinism rerun: A, B and B0 outer folds, all seeds | 13.0 | 147.7 |
-| 6 | Perturbation arm (exploratory), outer folds | 4.5 | **152.2** |
+| 0 | Scenario bank, 250 episodes (measured, already spent) | 3.2 | 3.2 |
+| 1 | Calibration: seed 0 outer folds, A, B and B0. CPU measured | 1.6 | 2.6 |
+| 2a | Nested selection of B (3 ratios) | 9.3 | 25.3 |
+| 2b | Nested selection of B0 (3 ratios, same rule) | 9.3 | 25.3 |
+| 3 | Outer folds: A, B and B0, seeds 1–4 | 6.3 | 10.4 |
+| 4a | Shortcut audit of B | 10.6 | 23.5 |
+| 4b | Shortcut audit of B0 | 10.6 | 23.5 |
+| 4c | Shortcut audit of A under `25685b84dd83f65c` | 10.1 | 21.2 |
+| 5 | Determinism rerun: A, B and B0 outer folds, all seeds | 7.8 | 13.0 |
+| 6 | Perturbation arm (exploratory) | 2.6 | 4.5 |
+| | **Total (ceiling)** | **71.5** (margin 108.5, 60%) | **152.7** (margin 27.3, 15%) |
+| | Wall time, 8 cores | about 9 h | about 19 h |
 
-- **Measured update (2026-11-10):** stage 0 was measured at 3.24 CPU-h for the 250 planned episodes, not 2.7. The
-  approved plan total is therefore 152.7 CPU-h, still inside the 153 planning ceiling (`docs/config-b-evidence.md`,
-  issue 25).
-- **Margin:** 27.8 CPU-h (15%) below the budget, inside the planning ceiling. Wall time is about 19 hours on 8
-  cores.
-- **UNSW-NB15:** if nothing is mapped there at the freeze, B and B0 equal A, and their UNSW-NB15 fits are not run.
-  The plan above still charges them, as a ceiling.
+**What Scope A leaves out, and why:**
+- every UNSW-NB15 fit: A, B and B0 outer folds, selection, audits, determinism rerun, and perturbation.
+- **Why:** with nothing mapped on UNSW-NB15, B and B0 are A, so every UNSW-NB15 contrast is zero by construction.
+  Selection there would compare identical training sets, and the perturbation arm has nothing to perturb.
+- **What is reported instead:** "B = B0 = A on UNSW-NB15: no mapping qualified". Config A's UNSW-NB15 results
+  already exist under `25685b84dd83f65c`, in the development reference run.
+- **Scope B** runs those fits anyway. They add no information, but they are well inside the budget if preferred.
+
+**Unchanged:**
+- all three ratio candidates (two are not proposed);
+- the full determinism rerun;
+- the fresh shortcut audit of A;
+- measured-CPU accounting;
+- re-projection before every stage;
+- the stop rules, below.
 
 **Phase 1 evidence, checked against the owner's conditions:**
 - **Shortcut audit of A:** not reused.
@@ -566,7 +634,8 @@ amendment (`frozen_identities.config_b`) before Phase 5.
 | More data, not better data | B beats A only through volume. | Data budget, B0, and B − B0 as the primary contrast. |
 | Nondeterminism | Results change across environments, as the autoencoder's did. | Pinned versions, a determinism rerun before reporting. No PyTorch model in Config B. |
 | Compute | The corrected ceiling is 152.2 CPU-h against 180, and the ceiling is not a measurement. | Calibration measures actual CPU. Re-projection and stop rules apply before every stage, with a stop at 175 measured (3.5). |
-| Replay concentrated on tiny families | `web_attack` has 62 training rows, which would be replayed about 16 times each at r = 1. Near-duplicate shortcuts follow. | Per-row replay cap (proposed: 4). Effective sample size reported. The shortcut audit applies to B and B0. |
+| Replay concentrated on tiny families | It was a risk for `web_attack` (62 rows), which is no longer mapped. Under the final mapping, the cap of 4 never binds in the illustration. | The per-row cap stays as a guard. Effective sample size reported. The shortcut audit applies to B and B0. |
+| Thin intervention | Two families. In two of the four folds only one mapped family remains. Mapped actions are about 11% of red activity. | Stated with every result. B − B0 reported per held-out family. No replacement mapping. |
 | Simulator code shapes the mix | CAGE's exploit selector never picks the highest-weight exploit when several apply, so `SSHBruteForce` dominates. | No CAGE change. The behaviour is frozen and reported as a limitation. |
 | Upstream defects for Config C | C-1, the intermittent firewall test; C-2, the decoy-path selector `TypeError` (section 1.4). | Neither affects B. Both are resolved or explicitly accounted for before C. |
 | Safety | — | Simulation only. Emulation, if ever, only in an explicitly authorized isolated lab. |
@@ -617,11 +686,22 @@ execution.
 - E1, E2 and E4 are approved at design level only, and **not authorized to execute.** E1b is deferred and E3
   withdrawn.
 
+**Recorded, revision 5 (owner, 2026-11-10):**
+- E4 accepted as corrected;
+- the final mapping is two families on improved CICIDS2017: `SSHBruteForce` → `brute_force`, and both service
+  discoveries → `portscan`;
+- `SQLInjection` → `web_attack` is rejected, and the threshold is not lowered. `HTTPRFI` and UNSW-NB15 stay
+  unmapped;
+- the weights are recalculated by the unchanged rule (2.6);
+- the 250 episodes are reused as a fixed scenario bank (50 per fold seed), which is not an independent validation
+  set;
+- the 152.7 CPU-h projection is accepted, with every compute rule kept.
+
 **Next approvals needed, in order:**
-1. Execution of E1, E2 and E4.
-2. The final mapping, once the evidence is in.
-3. The pre-registration amendment that freezes this protocol.
-4. Authorization to implement and run Config B.
+1. **The compute scope** (3.5): Scope A, improved CICIDS2017 only at 71.5 CPU-h (recommended), or Scope B, both
+   datasets at 152.7 CPU-h.
+2. **The pre-registration amendment** that freezes this protocol, the mapping and the scenario bank.
+3. **Authorization to implement and run Config B.**
 
 Nothing is frozen, and nothing runs. No Config B implementation, training data or model run starts before these decisions, the pre-registration
 amendment and the freeze.
