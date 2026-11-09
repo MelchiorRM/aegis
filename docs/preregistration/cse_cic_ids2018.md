@@ -326,7 +326,9 @@ registered (`registered_utc` 2026-11-08T17:07:51Z). Where an amendment changes a
   - **Section 9.2 condition 4 is met as "run and reported, failed".** No development estimate exists for
     `no_extractor_features`.
   - On 2018 the treatment still runs as specified in 6.2: exploratory, in its own table, outside the primary count.
-    Its 2018 result is reported without a development counterpart.
+    Its 2018 result is reported as an external exploratory ablation only. No development-to-external change is
+    claimed for it, because it has no development counterpart.
+  - The failed run is not reinterpreted as a success under any later criterion.
 
 **B. Deterministic scoring, and a re-freeze of Config A.**
 - **Finding.** On synthetic data, with the scikit-learn version of the recorded runs (1.6.1):
@@ -339,16 +341,31 @@ registered (`registered_utc` 2026-11-08T17:07:51Z). Where an amendment changes a
   and settings". With the current scoring, that repeat would not reproduce its own earlier rows.
 - **Change:** `models/baseline.py` now adds the trees' outputs in a fixed order (`forest_probability`). Fitting is
   unchanged. Tests check that the scores are equal, bit for bit, to `predict_proba` with one worker, for any worker
-  count and on repeated calls.
-- **Re-freeze:** Config A is re-frozen as **`bf0b730d63353ec8`**, which replaces `72166b4d433f5b87` for every
+  count and on repeated calls. Like `predict_proba`, it refuses input with the wrong number of features.
+- **Source audit against `1880f60`, the last commit before the change:**
+  - the only changed definitions in `models/baseline.py` are the scoring path (`forest_probability`,
+    `forest_log_odds` and the two `scores` methods that pass on the worker count);
+  - the trees fitted by the old and new code are identical, and so are the preprocessing inputs and outputs and the
+    feature count;
+  - the attack column is still the index of class 1, and the clipping and log-odds are unchanged;
+  - the old code with one worker and the new code with eight give bit-for-bit identical scores.
+- **Re-freeze:** Config A is re-frozen as **`25685b84dd83f65c`**, which replaces `72166b4d433f5b87` for every
   procedure that has not yet run, including the 2018 evaluation. Only the hash of `models/baseline.py` changes.
   The settings, the threshold rule, the data code, the seeds, the metrics and the shortcut rule do not.
-- **Results recorded under `72166b4d433f5b87` stand as recorded and are not recomputed:** Config A, the artifact
-  audits, the selection checks and the amendment 1 run. Their scores carry the thread-order noise. In the two
-  recomputations of 80 rows (the superseded run and the amendment 1 run), it never changed a rule input. It changed
-  AUC by up to 3.3e-11 and PR-AUC by up to 9.9e-4.
-- **Disclosed for the development-to-external description (section 10):** the development figures come from the
-  earlier identity, and the 2018 figures from the new one. The two differ only in how the trees' outputs are added.
+  - **Drafting history (disclosed):** this amendment was first committed, unsigned, with the identity
+    `bf0b730d63353ec8` (commits `c4a18eb`, `b569dff`). Before signing, the feature-count check above was added,
+    which gives `25685b84dd83f65c`. `bf0b730d63353ec8` was never used for any result.
+- **Results recorded under `72166b4d433f5b87` stay intact, as historical results:** Config A, the artifact audits,
+  the selection checks and the amendment 1 run. They are not edited, replaced or recomputed in place. Their scores
+  carry the thread-order noise. In the two recomputations of 80 rows (the superseded run and the amendment 1 run),
+  it never changed a rule input. It changed AUC by up to 3.3e-11 and PR-AUC by up to 9.9e-4.
+- **New development reference.** Config A is run again on the development data under `25685b84dd83f65c`, in its
+  own results folder with its own provenance, before the 2018 data is opened.
+  - That run is the development reference for the development-to-external description in section 10, so both sides
+    come from the same identity.
+  - It uses the frozen settings unchanged, seeds 0–4, and the procedure of the 2026-11-08 Config A run.
+  - It is compared with the historical run descriptively only. A difference is reported, not corrected, and the new
+    run stands as the reference whatever the comparison shows.
 - **Unchanged:** the registered text and fields, including `frozen_config_a` (`72166b4d433f5b87`) and
   `registered_utc`. The identity in force is the one in the latest amendment that sets one. The guard
   (`aegis.data.external`) reads it that way, and refuses to load the data while any amendment is unsigned.
