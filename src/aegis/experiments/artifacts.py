@@ -596,6 +596,8 @@ def run(
     log: Callable[[str], None] = print,
     save_scores: bool = False,
     treatments: tuple[str, ...] | None = None,
+    recorded: pd.DataFrame | None = None,
+    reproduce: tuple[str, ...] = (),
 ) -> pd.DataFrame:
     """Run or continue the artifact experiments, then write the combined result files.
 
@@ -603,7 +605,14 @@ def run(
     the score of every cleaned test row (``test_row`` indexes the cleaned dataset) and every raw entry
     (``raw_entry`` indexes the raw rows, with its flow hash and count), plus the thresholds.
     ``treatments`` limits the run to these treatments (the reference is always run); every name must apply.
+
+    With ``recorded``, the ``reproduce`` treatments run first, for every seed, and must reproduce the
+    recorded rows (``check_matches_recorded``, pre-registration 6.2 as amended) before any other treatment
+    is fitted or any result file is written. A failed check therefore leaves only the reproduced folds and
+    the manifest on disk. The passing report goes to ``reproduction.json``.
     """
+    if (recorded is None) != (not reproduce):
+        raise ValueError("recorded and reproduce must be given together")
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -639,6 +648,10 @@ def run(
             if missing:
                 raise ValueError(f"{name} has no treatments {sorted(missing)}")
             plans[name] = [t for t in plan if t.name in wanted]
+    for name, plan in plans.items():
+        unknown = set(reproduce) - {t.name for t in plan}
+        if unknown:
+            raise ValueError(f"{name} does not run the treatments to reproduce {sorted(unknown)}")
     extra = {
         "experiment": "artifact_resistance",
         "evaluation_role": EVALUATION_ROLE,
@@ -654,37 +667,55 @@ def run(
     ) * len(config.seeds)
     progress = Progress(total, log)
 
-    for seed in config.seeds:
-        for ds, _, raw_rows in prepared:
-            flow_signatures = signatures(ds)
-            flows = pd.util.hash_pandas_object(ds.X, index=False).to_numpy()
-            indicators = missingness_frame(ds)
-            partition = make_partition(ds.family, seed, config.val_fraction, config.test_fraction)
-            for family in eligible_families(ds.family, config.min_family_count):
-                fold = holdout_fold(partition, ds.family, family, config.max_train_per_family, seed)
-                for treatment in plans[ds.name]:
-                    label = f"{treatment.name}:{family}"
-                    if store.done(ds.name, seed, label):
-                        progress.skip()
-                        continue
-                    started = time.perf_counter()
-                    sink = None
-                    if save_scores:
-                        path = out / "scores" / f"{ds.name}_seed{seed}_{label.replace(':', '__')}.npz"
-                        path.parent.mkdir(exist_ok=True)
-                        sink = lambda arrays, path=path: np.savez_compressed(path, **arrays)
-                    rows = _fold_rows(
-                        ds, treatment, fold, seed, config, flow_signatures, indicators, raw_rows, flows,
-                        suspects[ds.name], sink,
-                    )
-                    store.save(ds.name, seed, label, rows)
-                    progress.update(f"seed {seed} {ds.name} {label}", time.perf_counter() - started)
-                    gc.collect()
+    def run_folds(selected: set[str] | None) -> None:
+        """Fit every fold of the treatments in ``selected`` (all of them when None), skipping stored folds."""
+        for seed in config.seeds:
+            for ds, _, raw_rows in prepared:
+                plan = [t for t in plans[ds.name] if selected is None or t.name in selected]
+                if not plan:
+                    continue
+                flow_signatures = signatures(ds)
+                flows = pd.util.hash_pandas_object(ds.X, index=False).to_numpy()
+                indicators = missingness_frame(ds)
+                partition = make_partition(ds.family, seed, config.val_fraction, config.test_fraction)
+                for family in eligible_families(ds.family, config.min_family_count):
+                    fold = holdout_fold(partition, ds.family, family, config.max_train_per_family, seed)
+                    for treatment in plan:
+                        label = f"{treatment.name}:{family}"
+                        if store.done(ds.name, seed, label):
+                            progress.skip()
+                            continue
+                        started = time.perf_counter()
+                        sink = None
+                        if save_scores:
+                            path = out / "scores" / f"{ds.name}_seed{seed}_{label.replace(':', '__')}.npz"
+                            path.parent.mkdir(exist_ok=True)
+                            sink = lambda arrays, path=path: np.savez_compressed(path, **arrays)
+                        rows = _fold_rows(
+                            ds, treatment, fold, seed, config, flow_signatures, indicators, raw_rows, flows,
+                            suspects[ds.name], sink,
+                        )
+                        store.save(ds.name, seed, label, rows)
+                        progress.update(f"seed {seed} {ds.name} {label}", time.perf_counter() - started)
+                        gc.collect()
 
-    results = store.load_all()
-    results = results[results["seed"].isin(config.seeds)].sort_values(ROW_KEYS).reset_index(drop=True)
-    results.to_csv(out / "results.csv", index=False)
+    def stored_results() -> pd.DataFrame:
+        results = store.load_all()
+        return results[results["seed"].isin(config.seeds)].sort_values(ROW_KEYS).reset_index(drop=True)
+
     primary_fpr = config.target_fprs[0]
+    if recorded is not None:
+        # Pre-registration 6.2, amendment 1: reproduce first, so a failed check leaves no other results on disk.
+        run_folds(set(reproduce))
+        report = check_matches_recorded(stored_results(), recorded, reproduce, primary_fpr)
+        largest = {c: e["max_abs_diff"] for c, e in report["tolerated"].items()}
+        log(f"Reproduced the recorded {list(reproduce)} rows ({report['rows']} rows; rule inputs exact; "
+            f"largest tolerated differences {largest})")
+        (out / "reproduction.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    run_folds(None)
+
+    results = stored_results()
+    results.to_csv(out / "results.csv", index=False)
     effects = summarize_treatments(results, config.bootstrap_samples, primary_fpr)
     effects.to_csv(out / "treatment_effects.csv", index=False)
     (out / "shortcut_rule.json").write_text(json.dumps(rule_report(effects, primary_fpr), indent=2), encoding="utf-8")
@@ -697,12 +728,33 @@ def run(
 # Columns that depend on the machine rather than the result.
 _TIMING_COLUMNS = ("fit_seconds",)
 
+# Pre-registration 6.2, amendment 1 (2026-11-09): secondary score summaries are compared within an absolute
+# tolerance, because they may move in the last digits when tied scores reorder. Every other column, including
+# every input to the shortcut rule, must match exactly.
+REPRODUCTION_TOLERANCES = {"auc": 1e-12, "pr_auc_prev_": 1e-3}  # Exact name, or a prefix ending in "_".
+# Realized FPR in every view: exact at the primary target FPR, within this tolerance at the others.
+FPR_COLUMNS = ("realized_fpr", "raw_fpr", "overlap_excluded_fpr")
+NON_PRIMARY_FPR_TOLERANCE = 1e-5
+# The evaluation view each tolerated column is computed on. AUC, PR-AUC and realized_fpr use the cleaned test rows.
+_VIEWS = {"raw_fpr": "raw", "overlap_excluded_fpr": "overlap-excluded"}
 
-def check_matches_recorded(results: pd.DataFrame, recorded: pd.DataFrame, treatments: tuple[str, ...]) -> int:
-    """Refuse a rerun whose rows for ``treatments`` differ from a recorded run (pre-registration 6.2).
 
-    Every recorded row of these treatments on the rerun's datasets and seeds must reappear with
-    identical values, apart from timing. Returns the number of rows compared.
+def _tolerance(column: str) -> float | None:
+    for name, tolerance in REPRODUCTION_TOLERANCES.items():
+        if column == name or (name.endswith("_") and column.startswith(name)):
+            return tolerance
+    return None
+
+
+def check_matches_recorded(
+    results: pd.DataFrame, recorded: pd.DataFrame, treatments: tuple[str, ...], primary_fpr: float
+) -> dict:
+    """Refuse a rerun whose rows for ``treatments`` differ from a recorded run (pre-registration 6.2, amendment 1).
+
+    Every recorded row of these treatments on the rerun's datasets and seeds must reappear. Values must be
+    identical, apart from timing, except for the tolerated columns: AUC, PR-AUC, and realized FPR at target
+    FPRs other than ``primary_fpr``. Returns the number of rows compared and, for each tolerated column, the
+    largest absolute difference found.
     """
     keep = recorded["treatment"].isin(treatments) & recorded["dataset"].isin(results["dataset"].unique())
     expected = recorded[keep & recorded["seed"].isin(results["seed"].unique())]
@@ -717,11 +769,60 @@ def check_matches_recorded(results: pd.DataFrame, recorded: pd.DataFrame, treatm
         raise ValueError(f"The rerun has {len(got)} rows for {list(treatments)}; the recorded run has {len(expected)}")
     left = got[columns].sort_values(ROW_KEYS).reset_index(drop=True)
     right = expected[columns].sort_values(ROW_KEYS).reset_index(drop=True)
-    try:
-        pd.testing.assert_frame_equal(left, right, check_exact=True, check_dtype=False)
-    except AssertionError as error:
-        raise ValueError(f"The rerun does not reproduce the recorded {list(treatments)} rows: {error}") from None
-    return len(left)
+
+    primary = np.isclose(right["target_fpr"].to_numpy(dtype=float), primary_fpr)
+    failures, tolerated = [], {}
+    for column in columns:
+        a, b = left[column], right[column]
+        both_missing = (a.isna() & b.isna()).to_numpy()
+        tolerance = NON_PRIMARY_FPR_TOLERANCE if column in FPR_COLUMNS else _tolerance(column)
+        if tolerance is None:
+            bad = ~(both_missing | (a == b).to_numpy())
+        else:
+            diff = np.abs(a.to_numpy(dtype=float) - b.to_numpy(dtype=float))
+            within = both_missing | (diff <= tolerance)
+            if column in FPR_COLUMNS:
+                # Tolerated only off the primary target FPR; at the primary target the FPR is a rule input.
+                bad = ~np.where(primary, both_missing | (diff == 0), within)
+                scope = np.asarray(~primary)
+            else:
+                bad = ~within
+                scope = np.ones(len(diff), dtype=bool)
+            tolerated[column] = _largest_difference(column, tolerance, diff, scope, left, right, primary_fpr)
+        if bad.any():
+            row = int(np.flatnonzero(bad)[0])
+            failures.append(f"{column}: {int(bad.sum())} rows, first {_row_key(right, row)} "
+                            f"rerun {a.iloc[row]!r} recorded {b.iloc[row]!r}")
+    if failures:
+        raise ValueError(f"The rerun does not reproduce the recorded {list(treatments)} rows: " + "; ".join(failures))
+    return {
+        "rows": len(left),
+        "treatments": list(treatments),
+        "primary_target_fpr": primary_fpr,
+        "exact": "every compared column not listed under tolerated, including every FPR column at the primary target",
+        "tolerated": tolerated,
+    }
+
+
+def _row_key(frame: pd.DataFrame, row: int) -> dict:
+    return {k: (v.item() if hasattr(v, "item") else v) for k, v in frame.loc[row, ROW_KEYS].items()}
+
+
+def _largest_difference(column, tolerance, diff, scope, left, right, primary_fpr) -> dict:
+    """The largest absolute difference of one tolerated column, with its view and the row it occurred in."""
+    candidates = np.flatnonzero(scope & ~np.isnan(diff))
+    entry = {
+        "view": _VIEWS.get(column, "deduplicated"),
+        "tolerance": tolerance,
+        "applies_to": f"target FPRs other than {primary_fpr}" if column in FPR_COLUMNS else "every target FPR",
+        "max_abs_diff": 0.0, "row": None, "rerun": None, "recorded": None,
+    }
+    if candidates.size:
+        row = int(candidates[np.argmax(diff[candidates])])
+        if diff[row] > 0:
+            entry.update(max_abs_diff=float(diff[row]), row=_row_key(right, row),
+                         rerun=float(left[column].iloc[row]), recorded=float(right[column].iloc[row]))
+    return entry
 
 
 def main() -> None:

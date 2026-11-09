@@ -116,21 +116,29 @@ print('Datasets:', [d.kind for d in config.datasets], 'seeds:', list(config.seed
 
 RUN = """\
 import time
+import pandas as pd
 
+# Exploratory mode: reference and no_tcp_window run first and must reproduce the recorded audit (6.2, amendment 1)
+# before no_extractor_features is fitted or any result file is written.
+exploratory = MODE == 'exploratory'
 started = time.time()
 results = run_artifacts(config, OUTPUT_DIR, extra_manifest={'source_version': SOURCE_VERSION, 'mode': MODE},
-                        treatments=EXPLORATORY_TREATMENTS if MODE == 'exploratory' else None)
+                        treatments=EXPLORATORY_TREATMENTS if exploratory else None,
+                        recorded=pd.read_csv(os.path.join(RECORDED_DIR, 'results.csv')) if exploratory else None,
+                        reproduce=('reference', 'no_tcp_window') if exploratory else ())
 print(f'Finished in {(time.time() - started) / 3600:.2f} h this session; {len(results)} result rows')
 """
 
 REPRODUCE = """\
-import pandas as pd
-from aegis.experiments.artifacts import check_matches_recorded
+import json
 
 if MODE == 'exploratory':
-    compared = check_matches_recorded(results, pd.read_csv(os.path.join(RECORDED_DIR, 'results.csv')),
-                                      ('reference', 'no_tcp_window'))
-    print(f'Reproduced the recorded audit exactly: {compared} reference and no_tcp_window rows.')
+    # The check ran inside the run, before any exploratory fold; a failure stops the run there.
+    with open(os.path.join(OUTPUT_DIR, 'reproduction.json'), encoding='utf-8') as handle:
+        reproduction = json.load(handle)
+    print(f"Reproduced the recorded audit: {reproduction['rows']} reference and no_tcp_window rows; rule inputs exact.")
+    for column, entry in reproduction['tolerated'].items():
+        print(f"  {column} ({entry['view']}, limit {entry['tolerance']}): max {entry['max_abs_diff']:.3g} at {entry['row']}")
 else:
     print('Full mode: no recorded run to reproduce.')
 """
@@ -266,7 +274,7 @@ import zipfile
 
 archive = f'{OUTPUT_DIR}/aegis_artifact_results.zip'
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
-    for name in ('manifest.json', 'results.csv', 'treatment_effects.csv', 'shortcut_rule.json', 'exploratory_effects.csv'):
+    for name in ('manifest.json', 'reproduction.json', 'results.csv', 'treatment_effects.csv', 'shortcut_rule.json', 'exploratory_effects.csv'):
         if os.path.exists(f'{OUTPUT_DIR}/{name}'):
             bundle.write(f'{OUTPUT_DIR}/{name}', name)
 print('Return this file with the executed notebook:', archive)

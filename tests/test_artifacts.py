@@ -394,13 +394,162 @@ def test_rerun_must_reproduce_the_recorded_rows():
                           effect_rows("other", [0.8, 0.7], [0.1, 0.1]).assign(fit_seconds=1.0)])
     recorded = recorded.drop_duplicates(["seed", "treatment"])
     rerun = recorded[recorded.treatment != "other"].assign(fit_seconds=9.0)
-    assert check_matches_recorded(rerun, recorded, (REFERENCE, "no_tcp_window")) == 4
+    assert check_matches_recorded(rerun, recorded, (REFERENCE, "no_tcp_window"), 0.01)["rows"] == 4
     changed = rerun.copy()
     changed.loc[changed.index[0], "raw_recall"] += 1e-12
     with pytest.raises(ValueError, match="does not reproduce"):
-        check_matches_recorded(changed, recorded, (REFERENCE, "no_tcp_window"))
+        check_matches_recorded(changed, recorded, (REFERENCE, "no_tcp_window"), 0.01)
     with pytest.raises(ValueError, match="Seeds"):
-        check_matches_recorded(rerun[rerun.seed == 0], recorded, (REFERENCE, "no_tcp_window"))
+        check_matches_recorded(rerun[rerun.seed == 0], recorded, (REFERENCE, "no_tcp_window"), 0.01)
+
+
+def reproduction_rows() -> pd.DataFrame:
+    """One fold at the primary (1%) and one at a non-primary (0.1%) target FPR, with every compared kind of column."""
+    rows = []
+    for target in (0.01, 0.001):
+        rows.append({
+            "dataset": "d", "seed": 0, "treatment": REFERENCE, "family": "f", "target_fpr": target, "fit_seconds": 1.0,
+            "auc": 0.97, "pr_auc_prev_0.01": 0.8, "pr_auc_prev_0.001": 0.5, "precision_prev_0.01": 0.7,
+            "recall": 0.6, "raw_recall": 0.6, "overlap_excluded_recall": 0.6, "recall_at_oracle_fpr": 0.62,
+            "realized_fpr": target, "raw_fpr": target, "overlap_excluded_fpr": target, "n_benign": 1000,
+            "recall_signature_matched": np.nan, "attack_rows_hash": "a", "benign_rows_hash": "b",
+        })
+    return pd.DataFrame(rows)
+
+
+def at(frame: pd.DataFrame, target: float, column: str, delta: float) -> pd.DataFrame:
+    changed = frame.copy()
+    changed.loc[changed.target_fpr == target, column] += delta
+    return changed
+
+
+@pytest.mark.parametrize("target, column, delta", [
+    (0.01, "auc", 9e-13),
+    (0.01, "pr_auc_prev_0.01", 9e-4),
+    (0.001, "pr_auc_prev_0.001", -9e-4),
+    (0.001, "raw_fpr", 9e-6),
+    (0.001, "overlap_excluded_fpr", -9e-6),
+    (0.001, "realized_fpr", 9e-6),
+])
+def test_reproduction_tolerates_secondary_summaries_within_the_amended_limits(target, column, delta):
+    recorded = reproduction_rows()
+    report = check_matches_recorded(at(recorded, target, column, delta), recorded, (REFERENCE,), 0.01)
+    assert report["rows"] == 2
+    entry = report["tolerated"][column]
+    assert entry["max_abs_diff"] == pytest.approx(abs(delta))
+    assert entry["row"] == {"dataset": "d", "seed": 0, "treatment": REFERENCE, "family": "f", "target_fpr": target}
+    assert entry["view"] == {"raw_fpr": "raw", "overlap_excluded_fpr": "overlap-excluded"}.get(column, "deduplicated")
+    assert entry["recorded"] == recorded.loc[recorded.target_fpr == target, column].item()
+    assert entry["rerun"] == pytest.approx(entry["recorded"] + delta)
+
+
+def test_reproduction_reports_every_tolerated_column_and_its_largest_difference():
+    recorded = reproduction_rows()
+    report = check_matches_recorded(recorded.copy(), recorded, (REFERENCE,), 0.01)
+    assert set(report["tolerated"]) == {"auc", "pr_auc_prev_0.01", "pr_auc_prev_0.001", "realized_fpr", "raw_fpr",
+                                        "overlap_excluded_fpr"}
+    assert all(e["max_abs_diff"] == 0.0 and e["row"] is None for e in report["tolerated"].values())
+    assert report["tolerated"]["raw_fpr"]["applies_to"] == "target FPRs other than 0.01"
+    rerun = at(at(recorded, 0.01, "auc", 2e-13), 0.001, "auc", 5e-13)  # The larger of two differences is reported.
+    entry = check_matches_recorded(rerun, recorded, (REFERENCE,), 0.01)["tolerated"]["auc"]
+    assert entry["max_abs_diff"] == pytest.approx(5e-13) and entry["row"]["target_fpr"] == 0.001
+
+
+@pytest.mark.parametrize("target, column, delta", [
+    (0.01, "auc", 2e-12),
+    (0.01, "pr_auc_prev_0.01", 2e-3),
+    (0.001, "raw_fpr", 2e-5),
+    (0.01, "raw_fpr", 1e-12),  # The primary FPR is a rule input: exact in every view.
+    (0.01, "overlap_excluded_fpr", 1e-12),
+    (0.01, "realized_fpr", 1e-12),
+    (0.01, "raw_recall", 1e-12),  # Recall in all three views is exact at every target FPR.
+    (0.001, "overlap_excluded_recall", 1e-12),
+    (0.001, "recall", 1e-12),
+    (0.01, "recall_at_oracle_fpr", 1e-12),
+    (0.01, "precision_prev_0.01", 1e-12),  # Not named in the amendment, so exact.
+    (0.01, "n_benign", 1),
+])
+def test_reproduction_is_exact_everywhere_else(target, column, delta):
+    recorded = reproduction_rows()
+    with pytest.raises(ValueError, match=f"does not reproduce.*{column}"):
+        check_matches_recorded(at(recorded, target, column, delta), recorded, (REFERENCE,), 0.01)
+
+
+def test_reproduction_compares_hashes_and_missing_values_exactly():
+    recorded = reproduction_rows()
+    changed = recorded.copy()
+    changed.loc[0, "benign_rows_hash"] = "c"
+    with pytest.raises(ValueError, match="benign_rows_hash"):
+        check_matches_recorded(changed, recorded, (REFERENCE,), 0.01)
+    changed = recorded.copy()
+    changed.loc[0, "recall_signature_matched"] = 0.5  # A recorded NaN must stay NaN.
+    with pytest.raises(ValueError, match="recall_signature_matched"):
+        check_matches_recorded(changed, recorded, (REFERENCE,), 0.01)
+    changed = recorded.copy()
+    changed.loc[1, "auc"] = np.nan  # A tolerated column may not turn into NaN either.
+    with pytest.raises(ValueError, match="auc"):
+        check_matches_recorded(changed, recorded, (REFERENCE,), 0.01)
+
+
+def test_reproduced_treatments_run_and_pass_before_any_other_fold(tmp_path):
+    log = lambda message: None
+    recorded = run(small_config(), tmp_path / "recorded", log=log, treatments=("all_controls",))
+    out = tmp_path / "rerun"
+    results = run(small_config(), out, log=log, treatments=("all_controls",),
+                  recorded=recorded, reproduce=(REFERENCE,))
+    columns = [c for c in recorded.columns if c != "fit_seconds"]
+    pd.testing.assert_frame_equal(results[columns], recorded[columns])  # Running in two phases changes nothing.
+    assert json.loads((out / "reproduction.json").read_text(encoding="utf-8"))["rows"] == int(
+        (recorded.treatment == REFERENCE).sum())
+
+
+def improved_config(tmp_path: Path) -> BaselineConfig:
+    """Small improved-format CSV files, so the real no_extractor_features treatment applies."""
+    fixtures = _load("test_notebook_fixtures", ROOT / "tests" / "test_notebook.py")
+    rng = np.random.default_rng(0)
+    folder = tmp_path / "data" / "improved"
+    fixtures.cicids_fixture(folder, rng)
+    add_improved_windows(folder, rng)
+    return BaselineConfig(
+        datasets=(DatasetConfig(kind="cicids2017_improved", path=str(folder), drop_columns=("Dst Port",)),),
+        seeds=(0,), max_train_per_family=2000, min_family_count=100, bootstrap_samples=100,
+        rf=RandomForestConfig(n_estimators=10, max_depth=6, n_jobs=1),
+    )
+
+
+def test_a_failed_reproduction_leaves_no_exploratory_results_on_disk(tmp_path):
+    log = lambda message: None
+    config = improved_config(tmp_path)
+    recorded = run(config, tmp_path / "recorded", log=log, treatments=("no_tcp_window",))
+    out = tmp_path / "rerun"
+    exploratory = dict(treatments=("no_tcp_window", EXPLORATORY), reproduce=(REFERENCE, "no_tcp_window"),
+                       save_scores=True, log=log)
+    broken = recorded.copy()
+    broken.loc[(broken.treatment == REFERENCE).idxmax(), "raw_recall"] += 0.01
+    with pytest.raises(ValueError, match="does not reproduce.*raw_recall"):
+        run(config, out, recorded=broken, **exploratory)
+
+    # Only the manifest and the reproduced folds (with their per-row scores) exist: no exploratory fold, score
+    # file or directory, and no result table.
+    assert sorted(p.name for p in out.iterdir()) == ["folds", "manifest.json", "scores"]
+    stored = list((out / "folds").glob("*.csv")) + list((out / "scores").glob("*"))
+    assert stored and all(EXPLORATORY not in p.name for p in stored)
+    assert all(p.is_file() for p in stored)
+    assert set(pd.concat([pd.read_csv(p) for p in (out / "folds").glob("*.csv")])["treatment"]) == {
+        REFERENCE, "no_tcp_window"}
+    assert not any(EXPLORATORY in str(p) for p in out.rglob("*"))
+
+    # The same folder then passes against the true recorded rows, and only then gains the exploratory results.
+    results = run(config, out, recorded=recorded, **exploratory)
+    assert set(results["treatment"]) == {REFERENCE, "no_tcp_window", EXPLORATORY}
+    assert (out / "exploratory_effects.csv").exists() and (out / "reproduction.json").exists()
+
+
+def test_reproduction_needs_both_the_recorded_rows_and_the_treatments(tmp_path):
+    with pytest.raises(ValueError, match="together"):
+        run(small_config(), tmp_path / "a", log=lambda message: None, reproduce=(REFERENCE,))
+    with pytest.raises(ValueError, match="together"):
+        run(small_config(), tmp_path / "b", log=lambda message: None, recorded=pd.DataFrame())
 
 
 def test_run_can_be_limited_to_named_treatments(tmp_path):
@@ -576,7 +725,9 @@ def test_notebook_uses_a_new_folder_and_runs_on_small_csv_files(tmp_path, monkey
     text = "\n".join(
         str(out.get("text", "")) for cell in notebook.cells if cell.cell_type == "code" for out in cell.outputs
     )
-    assert "Reproduced the recorded audit exactly: 16 reference and no_tcp_window rows" in text
+    assert "Reproduced the recorded audit: 16 reference and no_tcp_window rows; rule inputs exact." in text
+    reproduction = json.loads((exploratory / "reproduction.json").read_text(encoding="utf-8"))
+    assert reproduction["rows"] == 16 and {"auc", "raw_fpr"} <= set(reproduction["tolerated"])
     assert "EXPLORATORY (pre-registration 6.2)" in text
     rerun = pd.read_csv(exploratory / "results.csv")
     assert set(rerun["dataset"]) == {"cicids2017_improved"}
