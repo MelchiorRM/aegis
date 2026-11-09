@@ -145,8 +145,11 @@ Seed-0 counts are attempts executed (successful).
     model execution.
 - **E1b: deferred.**
 - **E3: withdrawn.**
-- **Run status:** approved at design level only, and **not authorized to execute** (owner, 2026-11-09). None
-  has been run.
+- **Run status (2026-11-09):** E1, E2 and E4 were authorized and run. Results are in `docs/config-b-evidence.md`:
+  - E1 completed for improved CICIDS2017, and is incomplete for UNSW-NB15 (sources not openly accessible);
+  - E2 completed;
+  - E4 stopped on its label-reproduction check, caused by a script defect. It is not rerun.
+  - The table in section 3 is unchanged until the owner decides on the proposed final mapping.
 - **Provisional entries:** every UNSW-NB15 entry stays provisional. A decision rule that is not clearly met leaves
   the entry unmapped, with no automatic promotion.
 **Common constraints for every step:**
