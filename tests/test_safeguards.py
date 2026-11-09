@@ -199,15 +199,15 @@ def test_external_set_follows_signed_amendments_and_refuses_unsigned_ones(tmp_pa
         external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "test")
 
 
-def test_the_real_preregistration_stays_closed_until_its_amendments_are_signed(tmp_path):
+def test_the_real_preregistration_is_signed_and_matches_the_frozen_config(tmp_path):
     config = load_config(ROOT / "configs" / "baseline.yaml")
     copy = tmp_path / "cse_cic_ids2018.json"  # A copy, so the real access log is not written.
     copy.write_text((ROOT / "docs" / "preregistration" / "cse_cic_ids2018.json").read_text(encoding="utf-8"))
     registered = json.loads(copy.read_text())
     assert registered["frozen_config_a"] == "72166b4d433f5b87"  # The registered value is never rewritten.
     assert registered["amendments"][-1]["frozen_config_a"] == frozen.frozen_digest()
-    with pytest.raises(PermissionError, match="not signed"):
-        external.guarded_load(copy, "cse_cic_ids2018", config, lambda: "data", "test")
+    assert all(a["amended_by"] and a["amended_utc"] for a in registered["amendments"])
+    assert external.check_preregistration(copy, "cse_cic_ids2018", config) == registered
 
 
 def test_the_ordinary_loader_refuses_the_external_set():

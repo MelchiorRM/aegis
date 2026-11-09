@@ -104,8 +104,8 @@
       "tolerances_set_after_seeing": "the reference and no_tcp_window differences listed in the reason; not any exploratory result",
       "exploratory_outputs_read_before_amendment": false,
       "superseded_run": "results/config_a_exploratory_improved (2026-11-09); all outputs kept unread",
-      "amended_by": null,
-      "amended_utc": null,
+      "amended_by": "MelchiorRM",
+      "amended_utc": "2026-11-09T05:31:40Z",
       "rerun": {
         "folder": "results/config_a_exploratory_improved_amended",
         "rf_n_jobs": 8,
@@ -145,8 +145,8 @@
       "frozen_config_a": "25685b84dd83f65c",
       "supersedes_frozen_config_a": "72166b4d433f5b87",
       "frozen_change": "implementation_sha256 of models/baseline.py only; settings, threshold rule, data code, seeds, metrics and shortcut rule unchanged",
-      "amended_by": null,
-      "amended_utc": null,
+      "amended_by": "MelchiorRM",
+      "amended_utc": "2026-11-09T05:31:40Z",
       "frozen_drafting_history": "first committed unsigned as bf0b730d63353ec8 (c4a18eb, b569dff); replaced before signing by 25685b84dd83f65c (adds the feature-count check); bf0b730d63353ec8 never used for any result"
     }
   ]
