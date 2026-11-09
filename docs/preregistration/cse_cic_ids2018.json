@@ -77,5 +77,48 @@
   ],
   "outside_the_rule": [
     "missingness_only"
+  ],
+  "amendments": [
+    {
+      "number": 1,
+      "date": "2026-11-09",
+      "amends": "plan section 6.2, development run: exact-match reproduction requirement",
+      "reason": "The 2026-11-09 development run reproduced every shortcut-rule input exactly, but secondary summaries differed in the last digits (AUC <= 2.2e-16, PR-AUC <= 9.4e-4, one non-primary FPR by 6.3e-6). Suspected thread-order effect in Random Forest probability summation; a hypothesis, not an established cause.",
+      "criterion": {
+        "exact": [
+          "recall in raw, overlap-excluded and deduplicated views at every target FPR",
+          "primary FPR: realized FPR at the 1% target FPR in all three evaluation views",
+          "attack and benign row hashes",
+          "every other shortcut-rule input and every other recorded column not listed as tolerated"
+        ],
+        "absolute_tolerance": {
+          "auc": 1e-12,
+          "pr_auc": 0.001,
+          "fpr_at_non_primary_target (0.1%)": 1e-05
+        },
+        "order": "reproduced treatments run and are checked before any exploratory fold is fitted or any result table written",
+        "report": "reproduction.json records, for every tolerated column, the largest absolute difference, its evaluation view, its row (dataset, seed, treatment, family, target FPR) and both values",
+        "on_failure": "reported as failed; tolerances are not widened"
+      },
+      "scope": "numerical reproducibility of secondary summaries only; no change to the evaluation protocol, rule inputs, primary verdicts, frozen Config A or Config A results",
+      "tolerances_set_after_seeing": "the reference and no_tcp_window differences listed in the reason; not any exploratory result",
+      "exploratory_outputs_read_before_amendment": false,
+      "superseded_run": "results/config_a_exploratory_improved (2026-11-09); all outputs kept unread",
+      "amended_by": null,
+      "amended_utc": null,
+      "rerun": {
+        "folder": "results/config_a_exploratory_improved_amended",
+        "rf_n_jobs": 8,
+        "seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "frozen_config_a": "72166b4d433f5b87",
+        "n_jobs_in_frozen_identity": false
+      }
+    }
   ]
 }

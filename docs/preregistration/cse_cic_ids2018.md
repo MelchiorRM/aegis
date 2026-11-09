@@ -242,3 +242,65 @@ All of the following hold and are recorded, by amendment, before the download:
 - **Later configurations:** the same measurements for each frozen configuration. The ablation comparisons are B vs A,
   C vs B, D vs C and E vs D, on held-out recall at 1% target FPR in the raw view. Each later configuration's frozen
   identity is added here by amendment before the data is opened.
+
+## Amendments
+Each amendment is dated and given a reason, and is made before the 2018 data is opened. The text above stays as
+registered (`registered_utc` 2026-11-08T17:07:51Z). Where an amendment changes a requirement, the amendment governs.
+
+### Amendment 1, 2026-11-09: reproduction criterion for the 6.2 development run
+- **Amends:** section 6.2, "Development run". The sentence "Those rows are recomputed in the same run and must match
+  the recorded ones exactly, or the run stops" is replaced by the criterion below. Nothing else in 6.2 changes.
+- **Reason:**
+  - The development run of 2026-11-09 recomputed 80 reference and `no_tcp_window` rows. It stopped at the exact-match
+    check.
+  - Every input to the shortcut rule matched exactly: raw, overlap-excluded and deduplicated recall at both target
+    FPRs, realized FPR at the primary target, the attack and benign row hashes, oracle recall, precision and the
+    signature counts.
+  - Only secondary summaries differed: AUC by at most 2.2e-16, PR-AUC by at most 9.4e-4, and the raw and
+    overlap-excluded FPR in one row at the 0.1% target, by 6.3e-6 (about 2 of 316,130 benign rows).
+- **Suspected cause, a hypothesis only:** the Random Forest may sum its trees' probabilities in an order that varies
+  with the number of worker threads (8 in this run, 2 in the recorded run). Last-digit differences in scores can then
+  reorder tied scores. This has not been tested, and the amendment does not depend on it being the cause.
+- **New criterion.** The recomputed rows must reappear with the same row keys, and:
+  - **Exact match required:**
+    - recall in all three evaluation views (raw, overlap-excluded, deduplicated), at every target FPR;
+    - the primary FPR: realized FPR at the 1% target FPR, in all three evaluation views;
+    - the attack and benign row hashes;
+    - every other input to the shortcut rule, and every other recorded column not listed below (counts, oracle
+      recall, precision, signature counts). Missing values must be missing on both sides.
+  - **Within an absolute tolerance:**
+    - AUC: |difference| ≤ 1e-12;
+    - PR-AUC, at each attack prevalence: |difference| ≤ 0.001;
+    - realized FPR at target FPRs other than the primary one (currently the 0.1% target), in every view:
+      |difference| ≤ 1e-5.
+  - Timing columns are not compared, as before.
+  - For every tolerated column, `reproduction.json` records the largest absolute difference found, the evaluation
+    view the column belongs to, the row it occurred in (dataset, seed, treatment, family, target FPR) and both
+    values. It is reported with the run.
+  - A failure is not resolved by widening a tolerance. A rerun that fails this criterion is reported as failed.
+- **What the tolerances are for:** they cover numerical reproducibility of secondary summaries only. They do not
+  change the evaluation protocol, the treatments, the shortcut rule, its inputs or any primary result. A difference
+  in any rule input still stops the run.
+- **Order of the run:** the recomputed `reference` and `no_tcp_window` folds run first, for every seed, and the check
+  runs on them before `no_extractor_features` is fitted. A failed check stops the run before any exploratory fold is
+  computed or any result table is written.
+- **How the tolerances were set (disclosed):** they were chosen after the differences above were known, so they were
+  informed by the size of those differences. The PR-AUC limit (0.001) is close to the largest observed difference
+  (9.4e-4). They were not informed by any exploratory result.
+- **State of the exploratory outputs when this amendment was made:** the 2026-11-09 run wrote
+  `exploratory_effects.csv`, `treatment_effects.csv`, `results.csv` and its `no_extractor_features` fold files
+  before its check ran. None of them had been read or reviewed when this amendment was made.
+- **The 2026-11-09 run:** it is superseded, and all its outputs, exploratory ones included, are kept unread. The
+  development run is repeated under this amendment, in a new results folder, with:
+  - the same frozen Config A, seeds 0–4 and software environment;
+  - 8 Random Forest workers (`n_jobs=8`), matching the superseded run. The worker count is recorded in the run
+    metadata (`manifest.json`). It is not part of the frozen Config A identity, and no frozen model or evaluation
+    setting changes.
+- **Unchanged:**
+  - the frozen Config A identity `72166b4d433f5b87`, and every Config A result;
+  - every primary shortcut verdict, including the five development verdicts in 6.3;
+  - the exploratory status of `no_extractor_features` and its separation from the primary count;
+  - the reproduction criteria for the 2018 evaluation itself (section 9.3).
+- **Implementation:** `check_matches_recorded` and `run(..., recorded=..., reproduce=...)` in
+  `aegis.experiments.artifacts` (not a frozen file). Tests check each tolerance at and beyond its limit, exactness
+  everywhere else, and that a failed check leaves no other results on disk.
