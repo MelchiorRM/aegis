@@ -1,4 +1,5 @@
 import dataclasses
+import hashlib
 import json
 from pathlib import Path
 
@@ -138,6 +139,23 @@ def registration(**changes) -> dict:
     return {**base, **changes}
 
 
+def authorization(path: Path, **changes) -> dict:
+    """A valid Phase 5 opening authorization for the pre-registration at ``path``, with ``changes`` applied."""
+    base = {
+        "dataset": "cse_cic_ids2018", "phase": 5,
+        "preregistration_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "all_configurations_and_analyses_frozen": True,
+        "opening_conditions": {name: True for name in external.OPENING_CONDITIONS},
+        "configurations": {"config_a": frozen.frozen_digest()},
+        "authorized_by": "owner", "authorized_utc": "2026-11-09T05:31:41Z",  # After every signature, not in the future.
+    }
+    return {**base, **changes}
+
+
+def authorize(path: Path, **changes) -> None:
+    external.opening_authorization_path(path).write_text(json.dumps(authorization(path, **changes)), encoding="utf-8")
+
+
 def test_external_set_refuses_without_preregistration_and_logs_the_attempt(tmp_path):
     config = load_config(ROOT / "configs" / "baseline.yaml")
     path = tmp_path / "prereg.json"
@@ -171,13 +189,15 @@ def test_external_set_refuses_a_config_that_is_not_config_a(tmp_path):
         external.guarded_load(path, "cse_cic_ids2018", changed, lambda: "data", "test")
 
 
-def test_external_set_loads_once_registered_and_records_it(tmp_path):
+def test_external_set_loads_only_with_an_attested_opening_authorization_and_records_it(tmp_path):
     config = load_config(ROOT / "configs" / "baseline.yaml")
     path = tmp_path / "prereg.json"
     path.write_text(json.dumps(registration()), encoding="utf-8")
+    authorize(path)
     assert external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "final test") == "data"
     entry = json.loads(external.access_log_path(path).read_text().splitlines()[-1])
     assert entry["allowed"] is True and entry["purpose"] == "final test" and entry["preregistration_sha256"]
+    assert entry["opening_authorization_sha256"]
 
 
 def test_external_set_follows_signed_amendments_and_refuses_unsigned_ones(tmp_path):
@@ -187,6 +207,8 @@ def test_external_set_follows_signed_amendments_and_refuses_unsigned_ones(tmp_pa
     # The registered identity is outdated, and a signed amendment re-freezes to the current one.
     current = {"number": 2, "frozen_config_a": frozen.frozen_digest(), **signed}
     path.write_text(json.dumps(registration(frozen_config_a="old", amendments=[{"number": 1, **signed}, current])))
+    assert external.effective_frozen_config_a(json.loads(path.read_text())) == frozen.frozen_digest()
+    authorize(path)
     assert external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "test") == "data"
     # An unsigned amendment keeps the set closed, even when it changes nothing about Config A.
     for unsigned in ({"number": 1, "amended_by": "owner", "amended_utc": None}, {"number": 1}):
@@ -208,6 +230,114 @@ def test_the_real_preregistration_is_signed_and_matches_the_frozen_config(tmp_pa
     assert registered["amendments"][-1]["frozen_config_a"] == frozen.frozen_digest()
     assert all(a["amended_by"] and a["amended_utc"] for a in registered["amendments"])
     assert external.check_preregistration(copy, "cse_cic_ids2018", config) == registered
+
+
+def test_signed_amendments_alone_do_not_open_the_external_set(tmp_path):
+    config = load_config(ROOT / "configs" / "baseline.yaml")
+    path = tmp_path / "prereg.json"
+    signed = {"amended_by": "owner", "amended_utc": "2026-11-09T05:31:40Z"}
+    path.write_text(json.dumps(registration(amendments=[{"number": 1, **signed}, {"number": 2, **signed}])))
+    assert external.check_preregistration(path, "cse_cic_ids2018", config)  # The pre-registration itself is valid.
+    called = []
+    with pytest.raises(PermissionError, match="No Phase 5 opening authorization"):
+        external.guarded_load(path, "cse_cic_ids2018", config, lambda: called.append(1), "test")
+    assert not called
+    entry = json.loads(external.access_log_path(path).read_text().splitlines()[-1])
+    assert entry["allowed"] is False and entry["opening_authorization_sha256"] is None
+
+
+@pytest.mark.parametrize("changes, message", [
+    ({"authorized_by": None}, "attested by the registered owner"),
+    ({"authorized_by": ""}, "attested by the registered owner"),
+    ({"authorized_by": "someone else"}, "attested by the registered owner"),
+    ({"authorized_utc": None}, "not a UTC timestamp"),
+    ({"authorized_utc": "2026-11-10"}, "not a UTC timestamp"),
+    ({"authorized_utc": "2026-11-08T23:59:59Z"}, "predates the registration or one of its amendments"),
+    ({"authorized_utc": "2999-01-01T00:00:00Z"}, "dated in the future"),
+    ({"dataset": "unsw_nb15"}, "for 'unsw_nb15'"),
+    ({"phase": 4}, "Phase 5 only"),
+    ({"preregistration_sha256": "0" * 64}, "different version of the pre-registration"),
+    ({"all_configurations_and_analyses_frozen": False}, "every configuration and analysis is frozen"),
+    ({"all_configurations_and_analyses_frozen": "yes"}, "every configuration and analysis is frozen"),
+    ({"opening_conditions": {}}, "exactly the conditions"),
+    ({"opening_conditions": {name: True for name in external.OPENING_CONDITIONS[:-1]}}, "exactly the conditions"),
+    ({"opening_conditions": {**{n: True for n in external.OPENING_CONDITIONS}, external.OPENING_CONDITIONS[2]: False}},
+     "does not confirm"),
+    ({"configurations": {}}, "Config A included"),
+    ({"configurations": {"config_a": "deadbeefdeadbeef"}}, "frozen identity in force"),
+    ({"configurations": {"config_a": "not an identity"}}, "16 hexadecimal"),
+    ({"configurations": {"config_a": frozen.frozen_digest(), "config_b": "0123456789abcdef"}},
+     "config_b has no frozen identity recorded by signed amendment"),
+])
+def test_an_invalid_opening_authorization_is_refused(tmp_path, changes, message):
+    config = load_config(ROOT / "configs" / "baseline.yaml")
+    path = tmp_path / "prereg.json"
+    signed = {"amended_by": "owner", "amended_utc": "2026-11-09T05:31:40Z"}
+    path.write_text(json.dumps(registration(amendments=[{"number": 1, **signed}])))
+    authorize(path, **changes)
+    called = []
+    with pytest.raises(PermissionError, match=message):
+        external.guarded_load(path, "cse_cic_ids2018", config, lambda: called.append(1), "test")
+    assert not called
+
+
+def test_an_opening_authorization_is_void_after_the_preregistration_changes(tmp_path):
+    config = load_config(ROOT / "configs" / "baseline.yaml")
+    path = tmp_path / "prereg.json"
+    path.write_text(json.dumps(registration()))
+    authorize(path)
+    path.write_text(json.dumps(registration(primary_metric="something else")))
+    with pytest.raises(PermissionError, match="different version of the pre-registration"):
+        external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "test")
+
+
+def test_an_opening_authorization_must_match_every_configuration_recorded_by_amendment(tmp_path):
+    config = load_config(ROOT / "configs" / "baseline.yaml")
+    path = tmp_path / "prereg.json"
+    signed = {"amended_by": "owner", "amended_utc": "2026-11-09T05:31:40Z"}
+    later = {"number": 3, "frozen_identities": {"config_b": "0123456789abcdef"}, **signed}
+    path.write_text(json.dumps(registration(amendments=[{"number": 1, **signed}, later])))
+    both = {"config_a": frozen.frozen_digest(), "config_b": "0123456789abcdef"}
+    authorize(path, configurations=both)
+    assert external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "test") == "data"
+    authorize(path, configurations={**both, "config_b": "fedcba9876543210"})
+    with pytest.raises(PermissionError, match="config_b: authorized fedcba9876543210"):
+        external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "test")
+    # An authorization naming the right identity is still refused if the code no longer matches it.
+    path.write_text(json.dumps(registration(frozen_config_a="aaaaaaaaaaaaaaaa", amendments=[{"number": 1, **signed}])))
+    authorize(path, configurations={"config_a": "aaaaaaaaaaaaaaaa"})
+    with pytest.raises(PermissionError, match="different frozen Config A"):
+        external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "test")
+
+
+def test_a_malformed_frozen_identities_amendment_is_refused(tmp_path):
+    config = load_config(ROOT / "configs" / "baseline.yaml")
+    path = tmp_path / "prereg.json"
+    signed = {"amended_by": "owner", "amended_utc": "2026-11-09T05:31:40Z"}
+    for bad in (["config_b"], {"config_b": 7}):
+        path.write_text(json.dumps(registration(amendments=[{"number": 1, "frozen_identities": bad, **signed}])))
+        authorize(path)
+        with pytest.raises(PermissionError, match="frozen_identities must map"):
+            external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "test")
+
+
+def test_the_attestation_limitation_is_documented():
+    # The guard checks attestations, not cryptographic signatures, and must say so rather than imply more.
+    doc = external.__doc__
+    assert "not cryptographic signatures" in doc and "does not authenticate anyone" in doc
+
+
+def test_the_real_external_set_stays_closed(tmp_path):
+    # The signed pre-registration and amendments are in the repository; no opening authorization is.
+    # A tripwire until Phase 5: the owner's opening authorization is the only change that should make it fail.
+    real = ROOT / "docs" / "preregistration" / "cse_cic_ids2018.json"
+    assert not external.opening_authorization_path(real).exists()
+    assert not external.access_log_path(real).exists()  # Nobody has attempted to load it.
+    copy = tmp_path / real.name  # A copy, so the real access log is not written.
+    copy.write_text(real.read_text(encoding="utf-8"), encoding="utf-8")
+    config = load_config(ROOT / "configs" / "baseline.yaml")
+    with pytest.raises(PermissionError, match="No Phase 5 opening authorization"):
+        external.guarded_load(copy, "cse_cic_ids2018", config, lambda: "data", "test")
 
 
 def test_the_ordinary_loader_refuses_the_external_set():

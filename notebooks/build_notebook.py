@@ -113,7 +113,7 @@ ATTACK_PREVALENCES = (0.01, 0.001)  # Assumed attack share of traffic, not a mea
 MAX_TRAIN_PER_FAMILY = 100_000
 MIN_FAMILY_COUNT = 200
 
-# The roadmap places cross-dataset tests in phase 5, so they are off for this gate.
+# The roadmap places cross-dataset tests in phase 4, so they are off for this gate.
 RUN_CROSS_DATASET = os.environ.get('AEGIS_CROSS', '0') == '1'
 
 print('DATA_ROOT  ', DATA_ROOT)

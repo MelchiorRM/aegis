@@ -40,7 +40,7 @@ class AutoencoderConfig:
 class BaselineConfig:
     datasets: tuple[DatasetConfig, ...]
     seeds: tuple[int, ...] = (0, 1, 2, 3, 4)
-    cross_dataset: bool = False  # The roadmap places these tests in phase 5.
+    cross_dataset: bool = False  # The roadmap places these tests in phase 4.
     val_fraction: float = 0.2
     test_fraction: float = 0.2
     max_train_per_family: int | None = 100_000
