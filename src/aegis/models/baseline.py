@@ -10,6 +10,7 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed, effective_n_jobs
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
@@ -82,8 +83,36 @@ def fit_forest(config: RandomForestConfig, seed: int, X: np.ndarray, y: np.ndarr
     ).fit(X, y)
 
 
-def forest_log_odds(forest: RandomForestClassifier, X: np.ndarray) -> np.ndarray:
-    probability = forest.predict_proba(X)[:, list(forest.classes_).index(1)]
+def forest_probability(forest: RandomForestClassifier, X: np.ndarray, n_jobs: int = 1) -> np.ndarray:
+    """Attack probability, with the trees added in a fixed order so the result never depends on threads.
+
+    ``RandomForestClassifier.predict_proba`` adds the trees' outputs from several threads in whatever
+    order they finish. With more than one worker its last digits vary from call to call, and a tie
+    between two scores can then break either way. Here each thread takes a block of rows and adds every
+    tree in order, so the result is the same for any ``n_jobs`` and equal, bit for bit, to
+    ``predict_proba`` with ``n_jobs=1``.
+    """
+    column = list(forest.classes_).index(1)
+    X = np.ascontiguousarray(X, dtype=np.float32)  # What the trees expect, so each call skips the check.
+    bounds = np.linspace(0, len(X), min(len(X), effective_n_jobs(n_jobs)) + 1).astype(int)
+
+    def block(start: int, stop: int) -> np.ndarray:
+        total = np.zeros((stop - start, forest.n_classes_))
+        for tree in forest.estimators_:
+            total += tree.predict_proba(X[start:stop], check_input=False)
+        total /= len(forest.estimators_)
+        return total[:, column]
+
+    if len(X) == 0:
+        return np.empty(0)
+    parts = Parallel(n_jobs=n_jobs, prefer="threads")(
+        delayed(block)(start, stop) for start, stop in zip(bounds[:-1], bounds[1:])
+    )
+    return np.concatenate(parts)
+
+
+def forest_log_odds(forest: RandomForestClassifier, X: np.ndarray, n_jobs: int = 1) -> np.ndarray:
+    probability = forest_probability(forest, X, n_jobs)
     clipped = np.clip(probability, 1e-6, 1 - 1e-6)
     return np.log(clipped / (1 - clipped))
 
@@ -113,7 +142,7 @@ class RandomForestBaseline:
         return self
 
     def scores(self, X: pd.DataFrame) -> np.ndarray:
-        return forest_log_odds(self.forest, self.preprocessor.transform(X).astype(np.float32))
+        return forest_log_odds(self.forest, self.preprocessor.transform(X).astype(np.float32), self.rf_config.n_jobs)
 
 
 class RFAEBaseline:
@@ -163,7 +192,7 @@ class RFAEBaseline:
         return self
 
     def _raw_scores(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        rf = forest_log_odds(self.forest, X)
+        rf = forest_log_odds(self.forest, X, self.rf_config.n_jobs)
         ae = np.log(self.autoencoder.reconstruction_error(X) + 1e-12)
         return rf, ae
 

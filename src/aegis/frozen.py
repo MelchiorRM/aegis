@@ -50,7 +50,7 @@ FROZEN = {'scorer': 'rf',
                            'data/loaders.py': 'd8294e7873f113827e5bb14fe7a42d124076bb0197cfdf55d688ca0f81799f94',
                            'data/splits.py': '2836ea104a746428113c87b7305e988662e2be5c65e22f92ac2260e15563b097',
                            'evaluation/metrics.py': '09665b94a4a31c1c2ba6d8afba7085ae0552748be346f237513e60159ea65013',
-                           'models/baseline.py': '9ad60689d7e836271eaa4dad1b639b7d4f8d34f4307a5c088eaa82972bbdbffa'}}
+                           'models/baseline.py': 'fb64a5f6d34179d4c7ed7703440a08ed0e1046e7a1b3e822b1531ed1b3757314'}}
 # END FROZEN
 
 

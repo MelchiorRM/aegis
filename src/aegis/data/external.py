@@ -1,8 +1,9 @@
 """The only way to load an external test set, so it is touched once and on the record.
 
 An external dataset is loaded through ``guarded_load``. It refuses unless a pre-registration file
-exists, names this dataset, has every required field, and records the frozen Config A identity that
-the current configuration and code still match. Every attempt, refused or not, is appended to an
+exists, names this dataset, has every required field and only signed amendments, and records (directly
+or through its latest amendment) the frozen Config A identity that the current configuration and code
+still match. Every attempt, refused or not, is appended to an
 access log beside the pre-registration file.
 """
 
@@ -48,10 +49,26 @@ def check_preregistration(path: Path, dataset: str, config: BaselineConfig) -> d
         raise PermissionError(f"The pre-registration is missing {missing}")
     if registration["dataset"] != dataset:
         raise PermissionError(f"The pre-registration is for {registration['dataset']}, not {dataset}")
-    if registration["frozen_config_a"] != frozen_digest():
+    if effective_frozen_config_a(registration) != frozen_digest():
         raise PermissionError("The pre-registration records a different frozen Config A")
     verify_config_a(config)
     return registration
+
+
+def effective_frozen_config_a(registration: dict) -> str:
+    """The frozen Config A identity in force: the registered one, or the latest amendment's that sets one.
+
+    The registered fields are never rewritten. A re-freeze is recorded as an amendment carrying the new
+    ``frozen_config_a``. Every amendment must be signed (``amended_by`` and ``amended_utc``) before the
+    external set can be loaded, so an amendment that was drafted but not adopted keeps the data closed.
+    """
+    identity = registration["frozen_config_a"]
+    for number, amendment in enumerate(registration.get("amendments", []), start=1):
+        unsigned = [field for field in ("amended_by", "amended_utc") if not amendment.get(field)]
+        if unsigned:
+            raise PermissionError(f"Amendment {amendment.get('number', number)} is not signed ({unsigned})")
+        identity = amendment.get("frozen_config_a", identity)
+    return identity
 
 
 def guarded_load(

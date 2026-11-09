@@ -13,7 +13,9 @@ from aegis.data.loaders import generate_synthetic
 from aegis.data.splits import holdout_fold, make_partition, seen_fold
 from aegis.evaluation.metrics import threshold_at_fpr
 from aegis.experiments.baseline import phase1_gate, run
-from aegis.models.baseline import RFAEBaseline, TailCalibrator, build_preprocessor
+from aegis.models.baseline import (
+    RandomForestBaseline, RFAEBaseline, TailCalibrator, build_preprocessor, fit_forest, forest_probability,
+)
 from aegis.provenance import file_sha256
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -263,3 +265,41 @@ def test_phase1_gate_reports_missing_measurements():
     gate = phase1_gate(results, [ds], config).set_index("family")
     assert bool(gate.loc["scan", "complete"]) is True
     assert bool(gate.loc["flood", "complete"]) is False
+
+
+def forest_and_rows(n_jobs=4):
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(3000, 8)).astype(np.float32)
+    y = (X[:, 0] + 0.5 * X[:, 1] + rng.normal(scale=0.8, size=3000) > 0).astype(int)
+    return fit_forest(RandomForestConfig(n_estimators=40, max_depth=8, n_jobs=n_jobs), 0, X[:2000], y[:2000]), X[2000:]
+
+
+def test_forest_scores_are_identical_for_every_worker_count_and_repeat():
+    # predict_proba with several workers adds trees in thread order, so its last digits vary between calls.
+    forest, X = forest_and_rows()
+    serial = forest.set_params(n_jobs=1).predict_proba(X)[:, 1]
+    for n_jobs in (1, 2, 3, 8, -1):
+        for _ in range(3):
+            assert np.array_equal(forest_probability(forest, X, n_jobs), serial), n_jobs
+    assert np.array_equal(forest_probability(forest, X[:5], 8), serial[:5])  # Fewer rows than blocks.
+    assert forest_probability(forest, X[:0], 4).shape == (0,)
+
+
+def test_forest_fit_does_not_depend_on_the_worker_count():
+    one, X = forest_and_rows(n_jobs=1)
+    eight, _ = forest_and_rows(n_jobs=8)
+    assert np.array_equal(forest_probability(one, X), forest_probability(eight, X))
+
+
+def test_baseline_scores_do_not_depend_on_the_worker_count():
+    ds = generate_synthetic(seed=1)
+    fold = holdout_fold(make_partition(ds.family, 0, 0.2, 0.2), ds.family, "exfil", 2000, 0)
+    y = (ds.family[fold.train] != BENIGN).astype(int)
+    val_benign = fold.val[ds.family[fold.val] == BENIGN]
+    numeric = [c for c in ds.X.columns if c not in ds.categorical]
+    scores = []
+    for n_jobs in (1, 8):
+        model = RandomForestBaseline(RandomForestConfig(n_estimators=30, max_depth=8, n_jobs=n_jobs), seed=0).fit(
+            ds.X.iloc[fold.train], y, ds.X.iloc[val_benign], numeric, ds.categorical)
+        scores.append((model.val_benign_scores, model.scores(ds.X.iloc[fold.test])))
+    assert all(np.array_equal(a, b) for a, b in zip(*scores))

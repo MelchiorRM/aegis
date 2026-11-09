@@ -180,6 +180,36 @@ def test_external_set_loads_once_registered_and_records_it(tmp_path):
     assert entry["allowed"] is True and entry["purpose"] == "final test" and entry["preregistration_sha256"]
 
 
+def test_external_set_follows_signed_amendments_and_refuses_unsigned_ones(tmp_path):
+    config = load_config(ROOT / "configs" / "baseline.yaml")
+    path = tmp_path / "prereg.json"
+    signed = {"amended_by": "owner", "amended_utc": "2026-11-09T00:00:00Z"}
+    # The registered identity is outdated, and a signed amendment re-freezes to the current one.
+    current = {"number": 2, "frozen_config_a": frozen.frozen_digest(), **signed}
+    path.write_text(json.dumps(registration(frozen_config_a="old", amendments=[{"number": 1, **signed}, current])))
+    assert external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "test") == "data"
+    # An unsigned amendment keeps the set closed, even when it changes nothing about Config A.
+    for unsigned in ({"number": 1, "amended_by": "owner", "amended_utc": None}, {"number": 1}):
+        path.write_text(json.dumps(registration(amendments=[unsigned])))
+        with pytest.raises(PermissionError, match="Amendment 1 is not signed"):
+            external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "test")
+    # A later amendment's identity wins, so an outdated re-freeze is refused.
+    path.write_text(json.dumps(registration(amendments=[{"number": 1, "frozen_config_a": "stale", **signed}])))
+    with pytest.raises(PermissionError, match="different frozen Config A"):
+        external.guarded_load(path, "cse_cic_ids2018", config, lambda: "data", "test")
+
+
+def test_the_real_preregistration_stays_closed_until_its_amendments_are_signed(tmp_path):
+    config = load_config(ROOT / "configs" / "baseline.yaml")
+    copy = tmp_path / "cse_cic_ids2018.json"  # A copy, so the real access log is not written.
+    copy.write_text((ROOT / "docs" / "preregistration" / "cse_cic_ids2018.json").read_text(encoding="utf-8"))
+    registered = json.loads(copy.read_text())
+    assert registered["frozen_config_a"] == "72166b4d433f5b87"  # The registered value is never rewritten.
+    assert registered["amendments"][-1]["frozen_config_a"] == frozen.frozen_digest()
+    with pytest.raises(PermissionError, match="not signed"):
+        external.guarded_load(copy, "cse_cic_ids2018", config, lambda: "data", "test")
+
+
 def test_the_ordinary_loader_refuses_the_external_set():
     with pytest.raises(PermissionError, match="guarded_load"):
         load_dataset(DatasetConfig(kind="cse_cic_ids2018", path="anywhere"))
