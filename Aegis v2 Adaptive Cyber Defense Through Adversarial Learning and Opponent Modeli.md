@@ -1,12 +1,14 @@
 # Aegis v2: Adaptive Cyber Defense Through Adversarial Learning and Opponent Modeling
 
-Nov 7, 2026 · @Melchior Remilien
+Nov 7, 2026 · @Melchior Remilien · updated Nov 9, 2026 (Phase 1 status, improved-release audit, frozen identity, seven-phase roadmap)
 
 ## Objective and positioning
 
 Aegis v2 tests one question: does co-training a defender against adaptive attackers, combined with opponent modeling, improve generalization to unseen attack families while keeping detection performance and response cost acceptable?
 
 It does not claim to invent multi-agent cybersecurity, adaptive attackers or intrusion detection. Its contribution is a leakage-controlled test of a hypothesis the baseline paper does not investigate: whether learning an opponent's evolving behavior yields a more generalizable defender than training against a fixed collection of attacks.
+
+**End goal (adopted Nov 9, 2026).** Aegis aims at a working adaptive cyber-defense platform, not only papers. Experiments decide its architecture: a component (opponent modeling, a generative model, an RL defender) is integrated only if it shows a measurable, statistically meaningful gain over simpler baselines. The research questions are unchanged. The roadmap below separates the experimental research (Phases 1–5) from system development (Phases 6–7).
 
 |  | Agrawal et al. (2026) | Aegis v2 |
 | --- | --- | --- |
@@ -56,6 +58,12 @@ Three connected questions, each independently measurable. Hypotheses are to be t
 
 A null result on any question is reportable if the evaluation is rigorous.
 
+**Where each question is measured (roadmap below):**
+- **RQ1** in Phase 2: Config C against A and B on held-out families.
+- **RQ2** in Phase 3: Configs D and E against C.
+- **RQ3** in Phase 4: cross-dataset and cross-environment tests, realistic prevalence and cost-weight sensitivity, on development data.
+- **All three, once, in Phase 5:** each frozen configuration is evaluated on the untouched CSE-CIC-IDS2018. That is the only source of final generalization claims, and it opens only through the separate Phase 5 opening authorization.
+
 ## Experimental configurations
 
 Five configurations isolate the effect of adversarial training, the historical league and opponent modeling.
@@ -68,7 +76,11 @@ Five configurations isolate the effect of adversarial training, the historical l
 | D | Adaptive defender | RL + historical league | Yes | Value of opponent modeling (RQ2) |
 | E | Adaptive defender | RL, no historical league | Yes | Opponent modeling without the league |
 
+Configs B and C are built and measured in Phase 2, and D and E in Phase 3. All five are compared again in Phase 4 and evaluated once externally in Phase 5.
+
 Configuration A originally used RF + AE. It was changed to the RF score after the Config A run, because RF was the strongest of the RF, AE and fused scores on held-out families; the choice used test results, so this must be disclosed. Configuration A is a paper-inspired baseline, not a replication. Exact replication is claimed only if the paper's preprocessing, model configuration and evaluation protocol can be reproduced; the paper does not release them, so deviations are documented.
+
+**The autoencoder is excluded (decided Nov 9, 2026).** The AE and fused scores are not reproducible across environments. At a fixed PyTorch thread count the autoencoder repeats bit for bit, but a different thread count changes its results. On improved CICIDS2017 (seed 1, port scan held out), AE recall at 1% FPR was 0.685 on Colab, 0.661 locally at 2 threads and 0.146 locally at 4 threads, while RF was identical in all three. AE and fused therefore stay out of Configurations B–E and out of every research claim. Their historical results stay as recorded, with this caveat, and are not corrected. If anomaly detection is reconsidered, it first needs a pinned thread count and PyTorch version, and a stability test across thread counts and seeds.
 
 ## Metrics and defender reward
 
@@ -134,6 +146,8 @@ The protocol exists to stop two agents from becoming good only at playing each o
 
 Benign rows that share a vector with an attack row count under "conflicts with benign". The shift is largest on UNSW-NB15, where attacks are 63.9% of raw rows but 43.6% of cleaned rows. Generic loses mostly repeats, while analysis, backdoor and DoS lose mostly vectors shared with other attack families. In CICIDS2017, PortScan keeps 1.2% of its raw rows, because about half repeat and half match benign rows. Every other CICIDS2017 family keeps 66% or more. A raw-view result therefore weights flows that the model could never have trained on, and the secondary views separate that effect.
 
+These figures are for the original CICIDS2017 release. On the improved release (development data since Nov 8, 2026), no feature vector carries two attack families, so its overlap-excluded view equals its raw view. Port scan keeps 7,695 cleaned rows of 230,833 raw rows, almost all of the rest being repeats.
+
 **Views.** Recall is reported in three views, with the same threshold in each. No label is changed, and no row leaves the primary view.
 
 | View | Rows | Role |
@@ -146,7 +160,9 @@ An attack-label overlap is an exact feature vector found under two or more attac
 
 ## Phase 1 results
 
-These results come from the artifact-resistance audit of 2026-11-08. It is a sensitivity audit of the selected baseline, not an unbiased estimate of generalization. Raw recall at 1% FPR, 5 seeds.
+### Original CICIDS2017 release and UNSW-NB15
+
+These results come from the artifact-resistance audit of 2026-11-08 on the original releases. It is a sensitivity audit of the selected baseline, not an unbiased estimate of generalization. Raw recall at 1% FPR, 5 seeds.
 
 The rule was applied to 60 comparisons. 8 met it, and 18 were not testable because reference recall was under 0.10 (CICIDS2017 bot and PortScan, UNSW-NB15 analysis and fuzzers). Three of the 8 come from the combined treatment and repeat a single-treatment result, which leaves five distinct shortcut dependencies:
 
@@ -163,15 +179,47 @@ Generic's dependence is on `service` itself, not on missingness: `-` is a docume
 - **Inconclusive:** brute force without TCP windows falls from 0.194 to 0.071, a drop of 0.122, but the interval runs from -0.010 to 0.235. It is classified as inconclusive, neither shortcut-dependent nor robust.
 - **Labels:** the possibly mislabeled CICIDS2017 benign rows keep their labels in every primary result. Excluding them, as a separate sensitivity analysis, raises brute force from 0.194 to 0.269 and DoS from 0.417 to 0.459, and changes no other family.
 
+### Improved CICIDS2017 release
+
+The improved release (Liu, Engelen et al., IEEE CNS 2022) replaced the original as development data on 2026-11-08, together with the improved CSE-CIC-IDS2018 as the untouched test. Its audit ran the same day (`results/config_a_artifacts_improved`), again as a sensitivity audit. Raw recall at 1% FPR, 5 seeds, held-out families with at least 200 cleaned rows. Web attack drops out, because most of its flows are "Attempted", which are never trained on.
+
+| Family | Reference | Without TCP window | Markers neutralized | Verdict under the rule |
+| --- | --- | --- | --- | --- |
+| Bot | 0.960 | 0.856 | 0.815 | Shortcut-dependent (window removed: drop 0.104, CI 0.027–0.211; markers neutralized: drop 0.145, CI 0.009–0.280) |
+| Brute force | 0.563 | 0.524 | 0.574 | Not dependent |
+| DoS | 0.998 | 0.993 | 0.997 | Not dependent |
+| Port scan | 0.679 | 0.369 | 0.458 | Shortcut-dependent (window removed: drop 0.310, CI 0.090–0.530) |
+
+- **Totals:** 5 of the 16 improved-CICIDS2017 comparisons meet the rule. UNSW-NB15's verdicts are unchanged.
+- **No near-duplicate leakage and no overlaps:** `remove_matching_signatures` removes no training rows, and the overlap-excluded view equals the raw view.
+- **The window explains part of the jump from the original release, not the headline.** Without it, a model that never saw the family still catches bot 0.86, DoS 0.993 and brute force 0.52 (original release: 0.004, 0.446, 0.104).
+- **Bot transfer depends on port scan in training:** inner-fold bot recall is 0.045 without port scan training rows and about 0.95 with them. A shared internal-host signature is a hypothesis, not a finding.
+- **Exploratory `no_extractor_features` (pre-registration 6.2):** its development run failed the reproduction check of amendment 1 on 2026-11-09 and produced no result. It is not repeated. On CSE-CIC-IDS2018 it is reported only as an external exploratory ablation, with no development-to-external claim.
+- No generalization claim is made from improved-CICIDS2017 held-out recall.
+
+### Development reference under the current frozen identity
+
+Config A was rerun on the development data under `25685b84dd83f65c` on 2026-11-09 (`results/config_a_improved_25685b84dd83f65c`). This run is the development reference for the external comparison. RF results equal the historical run in every row except PR-AUC, which differs by at most 1.1e-5 in 12 of 260 rows.
+
+| Improved CICIDS2017 family (RF, mean of seeds 0–4) | Held-out recall at 1% FPR | Seen minus held out (95% CI) | Held-out recall at 0.1% FPR |
+| --- | --- | --- | --- |
+| Bot | 0.957 | 0.044 (0.035–0.048) | 0.000 |
+| Brute force | 0.564 | 0.436 (0.429–0.444) | 0.039 |
+| DoS | 0.998 | 0.002 (0.002–0.003) | 0.903 |
+| Port scan | 0.444 | 0.555 (0.350–0.685) | 0.048 |
+
 ## Baseline selection and the untouched test
 
-**Development data.** CICIDS2017 and UNSW-NB15 are development data from now on. Every result on them has been seen, and the Random Forest baseline was chosen using their test results. No final generalization claim can come from them.
+**Development data.** CICIDS2017 (both the original and the improved release) and UNSW-NB15 are development data from now on. Every result on them has been seen, and the Random Forest baseline was chosen using their test results. No final generalization claim can come from them.
 
 **Frozen baseline.** Config A is frozen before any final test: Random Forest settings, preprocessing, cleaning, dropped features, training cap, and the threshold rule (the validation-benign quantile at the target false-positive rate). The freeze is recorded by source version and configuration file, and is not changed after the untouched data is loaded.
 
+- **Current frozen identity: `25685b84dd83f65c`** (`python -m aegis.frozen`). It was set by pre-registration amendment 2 (signed Nov 9, 2026), which changed only the Random Forest scoring: tree outputs are added in a fixed order, so scores no longer depend on the worker count.
+- **Earlier identities:** `72166b4d433f5b87` (the improved pair; its results stay intact as historical results) and, before that, `e7ab3bfcae0bb6b0` and `c5a771a0ce2826a6` (original data). `bf0b730d63353ec8` was an intermediate draft, abandoned before signing and never used for a result.
+
 **Selection for Configs B to E.** Models, thresholds and hyperparameters are selected on development data only, with a nested protocol. For each outer held-out family, an inner leave-one-family-out loop over the remaining training families makes every selection. The outer family is used only to report development results, never to choose.
 
-**Untouched test.** The final test uses a dataset that no one in this project has loaded. The proposed dataset is CSE-CIC-IDS2018, because it is produced with CICFlowMeter and has nearly the same features as CICIDS2017, though some column names need mapping. This is a proposal and needs confirmation before download. Its known caveats include labeling errors and tool artifacts similar to those in CICIDS2017, so the same audit treatments apply.
+**Untouched test.** The final test uses a dataset that no one in this project has loaded: **CSE-CIC-IDS2018, improved release** (confirmed Nov 8, 2026). It is produced with the same fixed CICFlowMeter as improved CICIDS2017, so the pair isolates network shift from extractor shift, though some column names need mapping. It is pre-registered in `docs/preregistration/cse_cic_ids2018.md` (registered Nov 8, 2026; amendments 1 and 2 signed Nov 9, 2026). It is opened once, at Phase 5. Its known caveats include labeling errors and tool artifacts similar to those in CICIDS2017, so the same audit treatments apply.
 
 - **Pre-registration:** before the first load, record the metrics, the three views, the shortcut rule, the families, and every planned comparison.
 - **One evaluation:** each frozen configuration is evaluated once. Any rerun after results have been seen is reported as such, with the reason.
@@ -185,9 +233,12 @@ Generic's dependence is on `service` itself, not on missingness: `-` is a docume
 3. **Frozen baseline:** a recorded identity for Config A (settings, preprocessing, cleaning, threshold rule, source hash). Later runs refuse to call a model Config A if it differs.
 4. **Untouched-test guard:** the external test set can be loaded only through a guarded entry point. It refuses to run without a pre-registration file matching the frozen identity, and it logs every access.
 
-Status, 2026-11-08: all four are implemented and tested. The baseline re-check has not been run yet.
+Status, 2026-11-09: all four are implemented and tested.
+- **Baseline re-check:** run on both releases. Original: rf in 49 of 65 outer folds, fused in 16, ae in none. Improved pair: rf in 60 of 60, with the majority rule set before any improved-release result. In 13 of those folds fused had the higher mean but no majority. Those margins rest on the AE score, which is not reproducible across environments.
+- **Untouched-test guard:** signing amendments does not open the external set. `guarded_load` also requires a separate, mandatory Phase 5 opening authorization from the project owner. It is bound to the exact pre-registration file, confirms each opening condition of plan section 9.2, and lists the frozen identity of every authorized configuration. No such authorization exists, and the 2018 data has not been downloaded.
+- **Limitation of the guard:** a "signature", on an amendment or on the opening authorization, is an attestation: a name and a UTC timestamp in a JSON file. The guard checks that it is present, names the registered owner, and is consistent in time and with the pre-registration's hash. It verifies no cryptographic signature or signed commit, so it does not authenticate the signer. Its integrity rests on the reviewed git history. The guard prevents accidental or premature opening, not deliberate circumvention.
 
-The external dataset is assessed in `docs/cse-cic-ids2018-assessment.md`. It is not acquired until the project owner confirms it.
+The external dataset is assessed in `docs/cse-cic-ids2018-assessment.md`. It is not downloaded before the Phase 5 opening authorization. The Phase 1 exit review is `docs/phase1-exit-review.md`.
 
 ## Extension: conditional generative model
 
@@ -201,15 +252,22 @@ The GAN is postponed, not abandoned. A generator is worth adding only if it impr
 
 ## Roadmap, risks and scope
 
-The work runs in five phases; each ends in a measured gate before the next begins. Dates are open until the available weeks and weekly hours are known.
+The work runs in two stages and seven phases; each phase ends in a measured gate before the next begins. Dates are open until the available weeks and weekly hours are known.
 
-1. **Foundation and baseline:** environment, data pipeline, Config A. Gate: the Phase 1 exit criteria above: audit reported, three UNSW-NB15 views reviewed, selection and untouched-test protocol fixed, and Config A frozen.
-2. **Fixed adversarial scenarios:** realization layer, scripted attacker, Config B. Gate: Config B measured against A.
-3. **Co-training:** RL attacker, historical league, Config C. Gate: C compared with A and B on held-out families.
-4. **Opponent modeling:** prediction models, Configs D and E. Gate: D and E compared with C.
-5. **Evaluation and write-up:** cross-dataset, sensitivity analysis, statistics. Gate: claims backed by seeds and intervals.
+**Stage 1, experimental research:** what works, and why.
 
-Each gate is a measurement, not a date: a phase closes only when its configuration has been evaluated on held-out attack families.
+1. **Baseline and integrity:** environment, data pipeline, dataset integrity, Config A. Gate: the Phase 1 exit criteria above: audit reported, three UNSW-NB15 views reviewed, selection and untouched-test protocol fixed, and Config A frozen.
+2. **Adaptive co-training:** realization layer, scripted attacker and Config B, then the RL attacker, historical league and Config C. Gate: B measured against A, and C compared with A and B on held-out families.
+3. **Opponent modeling:** prediction models, Configs D and E. Gate: D and E compared with C.
+4. **Robustness and ablations:** cross-dataset tests (RQ3), ablations, prevalence and cost-weight sensitivity, robustness, all on development data. Gate: claims backed by seeds, intervals and the shortcut rule, and every configuration to be compared frozen and recorded by amendment.
+5. **External evaluation:** the pre-registered, one-time evaluation of every frozen configuration on CSE-CIC-IDS2018. It is a separate, mandatory gate: the data is opened only with the project owner's Phase 5 opening authorization, which is never implied by signing amendments or by completing Phase 4. Gate: every result reported, including failed or unfavourable ones.
+
+**Stage 2, system development:** only methods validated in Stage 1.
+
+6. **System integration:** assemble only the components that passed their gates into one system: input layer, the validated detection engine, opponent intelligence and the adaptive defense agent, if each passed. Gate: each integrated component reproduces its validated measurement.
+7. **Interface and operations:** operational dashboards, monitoring and an experiment interface. Any deployment uses real telemetry in controlled environments only.
+
+Each gate is a measurement, not a date. In Stage 1, a phase closes only when its configuration has been evaluated on held-out attack families. In Stage 2, a phase closes only when what it builds reproduces the measurements that validated it.
 
 | Risk | Mitigation |
 | --- | --- |

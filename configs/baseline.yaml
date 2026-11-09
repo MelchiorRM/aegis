@@ -11,7 +11,7 @@ datasets:
   - kind: unsw_nb15
     path: data/unsw_nb15
 
-# The roadmap places cross-dataset tests in phase 5. Enabling them later adds folds to the
+# The roadmap places cross-dataset tests in phase 4. Enabling them later adds folds to the
 # same output folder.
 cross_dataset: false
 seeds: [0, 1, 2, 3, 4]

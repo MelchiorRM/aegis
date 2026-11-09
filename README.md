@@ -4,11 +4,11 @@ Aegis is a research project on adaptive cyber defense. It asks one question: doe
 co-training a defender against adaptive attackers, combined with opponent modeling, help
 it detect attack families it has never seen?
 
-> **Status: early-stage research.** The baseline defender (Config A) has been measured on
-> CICIDS2017 and UNSW-NB15 held-out families and audited for shortcuts. The audit found five distinct
-> shortcut dependencies in those scores, so this repository makes no performance claims. Config A is
-> now being re-measured on the improved CICIDS2017 release, which corrects known label and
-> feature-extraction errors, and is frozen on that data before any result exists.
+> **Status: early-stage research, Phase 1 under final review.** The baseline defender (Config A) has
+> been measured on CICIDS2017 (original and improved releases) and UNSW-NB15 held-out families, and
+> audited for shortcuts. The audits found shortcut dependencies on both CICIDS2017 releases, so this
+> repository makes no performance claims. Config A is frozen, and the external test (the improved
+> CSE-CIC-IDS2018) is pre-registered and stays unopened until Phase 5.
 
 ## Research foundation
 
@@ -50,18 +50,28 @@ Forest score is the baseline: it was the strongest of the three on held-out fami
 choice was made after seeing test results, so it was re-checked with the nested protocol later
 configurations must use, which never reads test rows. The fixed rule picked the Random Forest in 49 of
 65 outer folds and the fused score in the other 16, usually by small margins. It never picked the
-autoencoder. Config A is now frozen: its settings and the code that implements it are fingerprinted,
+autoencoder. On the improved release, with the rule fixed before any result existed, it picked the Random
+Forest in all 60 outer folds. The autoencoder and the fused score are excluded from later configurations:
+their results change with the PyTorch thread count, so they are not reproducible across environments. Config A is now frozen: its settings and the code that implements it are fingerprinted,
 and any change counts as a new baseline.
 
 ## Roadmap
 
 Each phase closes on a measurement, not a date.
 
-- [ ] **Phase 1, foundation and baseline:** Config A measured, audited and re-checked by nested selection on the original CICIDS2017; re-freezing on the improved release; open until Config A, the audit and the selection check are rerun on it and the external test set's pre-registration is written
-- [ ] **Phase 2, fixed adversarial scenarios:** traffic realization layer, scripted attacker, Config B
-- [ ] **Phase 3, co-training:** RL attacker, historical league, Config C
-- [ ] **Phase 4, opponent modeling:** prediction models, Configs D and E
-- [ ] **Phase 5, evaluation and write-up:** cross-dataset tests, sensitivity analysis, statistics
+Experiments decide the architecture: a component is built into the system only if it beats simpler
+baselines measurably.
+
+**Stage 1, experimental research**
+- [ ] **Phase 1, baseline and integrity:** Config A measured, audited, re-checked by nested selection and frozen on both CICIDS2017 releases and UNSW-NB15; external test pre-registered (under final review)
+- [ ] **Phase 2, adaptive co-training:** traffic realization layer, scripted attacker and Config B; RL attacker, historical league and Config C (RQ1)
+- [ ] **Phase 3, opponent modeling:** prediction models, Configs D and E (RQ2)
+- [ ] **Phase 4, robustness and ablations:** cross-dataset tests, ablations, prevalence and cost sensitivity (RQ3)
+- [ ] **Phase 5, external evaluation:** one pre-registered evaluation on CSE-CIC-IDS2018, behind a separate opening authorization
+
+**Stage 2, system development**
+- [ ] **Phase 6, system integration:** only components validated in Stage 1
+- [ ] **Phase 7, interface and operations:** dashboards, monitoring and an experiment interface
 
 ## How Config A is evaluated
 
@@ -93,8 +103,10 @@ Each phase closes on a measurement, not a date.
   dataset gives an honest estimate only if the analysis is fixed before it is opened: the metric,
   evaluation views, comparisons, family mapping and treatment of attempted attacks. The pre-registration
   records these choices first, so none of them can be made after seeing results. The loader refuses
-  the external dataset unless a pre-registration names it and the code still matches the frozen
-  Config A, and it logs every attempt.
+  the external dataset unless a pre-registration names it, the code still matches the frozen
+  Config A, and a separate Phase 5 opening authorization from the project owner exists. It logs every
+  attempt. Its signer fields are attestations in JSON files, not cryptographic signatures: the guard
+  prevents accidental or premature opening, not deliberate circumvention.
 - **Thresholds:** set from validation benign traffic only, with the false-positive rate
   actually reached reported alongside.
 - **Realistic prevalence:** PR-AUC and precision are reweighted to assumed attack shares of
