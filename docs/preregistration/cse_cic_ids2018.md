@@ -304,3 +304,51 @@ registered (`registered_utc` 2026-11-08T17:07:51Z). Where an amendment changes a
 - **Implementation:** `check_matches_recorded` and `run(..., recorded=..., reproduce=...)` in
   `aegis.experiments.artifacts` (not a frozen file). Tests check each tolerance at and beyond its limit, exactness
   everywhere else, and that a failed check leaves no other results on disk.
+
+### Amendment 2, 2026-11-09: outcome of the 6.2 development run, and deterministic scoring
+**A. The 6.2 development run failed the amended reproduction check.**
+- **The run:** commit `1880f60`, frozen Config A `72166b4d433f5b87`, scikit-learn 1.6.1, numpy 2.4.6, pandas 2.2.3,
+  `n_jobs=8`, seeds 0–4, folder `results/config_a_exploratory_improved_amended`.
+- **What happened:** the 40 reproduced folds (reference and `no_tcp_window`) ran, and the check stopped the run
+  before `no_extractor_features` was fitted. No exploratory fold, score or table exists.
+- **The failure:** `auc` in one fold (seed 0, `no_tcp_window`, DoS; AUC is stored once per target FPR, so two rows):
+  0.9982112799420346 against 0.9982112799749512 recorded. The difference, 3.29e-11, is half of one attack–benign
+  pair (1 / (attacks × benigns) = 6.58e-11): one pair tied in one run and ordered in the other. The limit was 1e-12.
+- **Everything else, diagnosed afterwards from the same 40 folds:**
+  - every rule input and every column without a tolerance matched exactly;
+  - realized FPR at the 1% target matched exactly in all three views;
+  - PR-AUC differed by at most 9.91e-4 (limit 1e-3), and FPR at the 0.1% target by at most 6.33e-6 (limit 1e-5).
+- **Why the AUC limit was too tight:** it was set from the 2.2e-16 seen in the superseded run, where no tie happened
+  to change. That limit is smaller than the effect of a single changed tie, which here is about 3e-11.
+- **Decision, per amendment 1:** the run is reported as failed and the tolerances are not widened.
+  - It is not repeated against the recorded audit. The recorded rows were scored with several workers (B below), so
+    no rerun can reproduce them bit for bit, and another attempt would test chance rather than the pipeline.
+  - **Section 9.2 condition 4 is met as "run and reported, failed".** No development estimate exists for
+    `no_extractor_features`.
+  - On 2018 the treatment still runs as specified in 6.2: exploratory, in its own table, outside the primary count.
+    Its 2018 result is reported without a development counterpart.
+
+**B. Deterministic scoring, and a re-freeze of Config A.**
+- **Finding.** On synthetic data, with the scikit-learn version of the recorded runs (1.6.1):
+  - `RandomForestClassifier.predict_proba` with more than one worker is not bit-for-bit repeatable, even at a fixed
+    worker count (15 of 15 repeats differed, by up to 4.4e-16). With one worker, every repeat was identical.
+  - Fitting does not depend on the worker count: forests fitted with 1 and 8 workers give identical scores.
+  - This supports the thread-order hypothesis of amendment 1 for the scoring step. It was shown on synthetic data,
+    not on the development data.
+- **Why it matters for the 2018 evaluation:** section 9.3 allows a crashed run to be repeated "with identical code
+  and settings". With the current scoring, that repeat would not reproduce its own earlier rows.
+- **Change:** `models/baseline.py` now adds the trees' outputs in a fixed order (`forest_probability`). Fitting is
+  unchanged. Tests check that the scores are equal, bit for bit, to `predict_proba` with one worker, for any worker
+  count and on repeated calls.
+- **Re-freeze:** Config A is re-frozen as **`bf0b730d63353ec8`**, which replaces `72166b4d433f5b87` for every
+  procedure that has not yet run, including the 2018 evaluation. Only the hash of `models/baseline.py` changes.
+  The settings, the threshold rule, the data code, the seeds, the metrics and the shortcut rule do not.
+- **Results recorded under `72166b4d433f5b87` stand as recorded and are not recomputed:** Config A, the artifact
+  audits, the selection checks and the amendment 1 run. Their scores carry the thread-order noise. In the two
+  recomputations of 80 rows (the superseded run and the amendment 1 run), it never changed a rule input. It changed
+  AUC by up to 3.3e-11 and PR-AUC by up to 9.9e-4.
+- **Disclosed for the development-to-external description (section 10):** the development figures come from the
+  earlier identity, and the 2018 figures from the new one. The two differ only in how the trees' outputs are added.
+- **Unchanged:** the registered text and fields, including `frozen_config_a` (`72166b4d433f5b87`) and
+  `registered_utc`. The identity in force is the one in the latest amendment that sets one. The guard
+  (`aegis.data.external`) reads it that way, and refuses to load the data while any amendment is unsigned.

@@ -119,6 +119,31 @@
         "frozen_config_a": "72166b4d433f5b87",
         "n_jobs_in_frozen_identity": false
       }
+    },
+    {
+      "number": 2,
+      "date": "2026-11-09",
+      "amends": "plan section 6.2 (outcome of the development run; section 9.2 condition 4) and the frozen Config A identity",
+      "development_run_6_2": {
+        "outcome": "failed the amendment 1 reproduction check; reported as failed; tolerances not widened",
+        "run": "results/config_a_exploratory_improved_amended, commit 1880f60, frozen 72166b4d433f5b87, n_jobs=8",
+        "failure": "auc, one fold (seed 0, no_tcp_window, dos): 3.29e-11 = half of one attack-benign pair; limit 1e-12",
+        "other_columns": "rule inputs and untolerated columns exact; PR-AUC max 9.91e-4; FPR at 0.1% max 6.33e-6",
+        "exploratory_outputs": "none produced",
+        "repeated": false,
+        "condition_9_2_4": "met as run and reported, failed; no development estimate for no_extractor_features",
+        "on_2018": "no_extractor_features still runs as in 6.2, exploratory, reported without a development counterpart"
+      },
+      "deterministic_scoring": {
+        "finding": "synthetic data, scikit-learn 1.6.1: predict_proba with n_jobs > 1 not bitwise repeatable even at a fixed worker count; n_jobs=1 repeatable; fitting independent of worker count",
+        "change": "models/baseline.py adds tree outputs in a fixed order (forest_probability); bitwise equal to predict_proba with n_jobs=1 for any worker count; fitting unchanged",
+        "earlier_results": "results recorded under 72166b4d433f5b87 stand as recorded and are not recomputed"
+      },
+      "frozen_config_a": "bf0b730d63353ec8",
+      "supersedes_frozen_config_a": "72166b4d433f5b87",
+      "frozen_change": "implementation_sha256 of models/baseline.py only; settings, threshold rule, data code, seeds, metrics and shortcut rule unchanged",
+      "amended_by": null,
+      "amended_utc": null
     }
   ]
 }
