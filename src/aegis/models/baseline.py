@@ -94,6 +94,8 @@ def forest_probability(forest: RandomForestClassifier, X: np.ndarray, n_jobs: in
     """
     column = list(forest.classes_).index(1)
     X = np.ascontiguousarray(X, dtype=np.float32)  # What the trees expect, so each call skips the check.
+    if X.ndim != 2 or X.shape[1] != forest.n_features_in_:
+        raise ValueError(f"X has shape {X.shape}; the forest was fitted on {forest.n_features_in_} features")
     bounds = np.linspace(0, len(X), min(len(X), effective_n_jobs(n_jobs)) + 1).astype(int)
 
     def block(start: int, stop: int) -> np.ndarray:

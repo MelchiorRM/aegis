@@ -283,6 +283,8 @@ def test_forest_scores_are_identical_for_every_worker_count_and_repeat():
             assert np.array_equal(forest_probability(forest, X, n_jobs), serial), n_jobs
     assert np.array_equal(forest_probability(forest, X[:5], 8), serial[:5])  # Fewer rows than blocks.
     assert forest_probability(forest, X[:0], 4).shape == (0,)
+    with pytest.raises(ValueError, match="fitted on 8 features"):  # As predict_proba would refuse it.
+        forest_probability(forest, X[:, :7], 4)
 
 
 def test_forest_fit_does_not_depend_on_the_worker_count():
