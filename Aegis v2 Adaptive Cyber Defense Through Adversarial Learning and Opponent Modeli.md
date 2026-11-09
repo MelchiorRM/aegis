@@ -225,6 +225,8 @@ Config A was rerun on the development data under `25685b84dd83f65c` on 2026-11-0
 - **One evaluation:** each frozen configuration is evaluated once. Any rerun after results have been seen is reported as such, with the reason.
 - **Data handling:** checksums are recorded at download. The data is not explored before the pre-registered evaluation, beyond the schema and label checks the loaders run.
 
+**Phase 1 closed on Nov 9, 2026**, when the project owner accepted the exit review (`docs/phase1-exit-review.md`, with its findings and conclusion). Phase 2 begins with the Config B design (`docs/config-b-design.md`).
+
 **Phase 1 exit criteria.** Phase 1 closes when the artifact audit is reported, the three UNSW-NB15 views are reviewed, this protocol is fixed, and Config A is frozen. Documentation is not enough: the safeguards below must be implemented in code and verified by tests. Config B and adversarial co-training do not start before then.
 
 **Required safeguards, implemented and tested:**
@@ -256,7 +258,7 @@ The work runs in two stages and seven phases; each phase ends in a measured gate
 
 **Stage 1, experimental research:** what works, and why.
 
-1. **Baseline and integrity:** environment, data pipeline, dataset integrity, Config A. Gate: the Phase 1 exit criteria above: audit reported, three UNSW-NB15 views reviewed, selection and untouched-test protocol fixed, and Config A frozen.
+1. **Baseline and integrity (closed Nov 9, 2026):** environment, data pipeline, dataset integrity, Config A. Gate: the Phase 1 exit criteria above: audit reported, three UNSW-NB15 views reviewed, selection and untouched-test protocol fixed, and Config A frozen.
 2. **Adaptive co-training:** realization layer, scripted attacker and Config B, then the RL attacker, historical league and Config C. Gate: B measured against A, and C compared with A and B on held-out families.
 3. **Opponent modeling:** prediction models, Configs D and E. Gate: D and E compared with C.
 4. **Robustness and ablations:** cross-dataset tests (RQ3), ablations, prevalence and cost-weight sensitivity, robustness, all on development data. Gate: claims backed by seeds, intervals and the shortcut rule, and every configuration to be compared frozen and recorded by amendment.

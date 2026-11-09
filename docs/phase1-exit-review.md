@@ -1,7 +1,45 @@
-# Phase 1 exit review (revised 2026-11-09)
+# Phase 1 exit review
+
+**Phase 1 is closed.** The project owner (MelchiorRM) accepted this review and approved closing Phase 1 on
+2026-11-09, at repository state `dd3bfae`. Phase 2 begins with the Config B design document
+(`docs/config-b-design.md`), with no implementation and no experiments until that design is approved.
 
 Checked against the v2 specification, "Phase 1 exit criteria" and "Required safeguards". Each item cites the record
-it rests on. This is a draft for the project owner. Phase 1 closes only when the owner accepts it.
+it rests on.
+
+## Findings
+1. **The baseline:** Config A is a static Random Forest, frozen as `25685b84dd83f65c`. Measured on held-out attack
+   families with leakage-controlled splits, it loses much of its recall on families it has not seen. The development
+   reference on improved CICIDS2017 (held-out recall at 1% FPR): bot 0.957, brute force 0.564, DoS 0.998, port scan
+   0.444, against 0.9995–1.0 when the family is seen.
+2. **Apparent generalization is partly shortcut-driven:**
+   - original releases: 5 distinct shortcut dependencies (web-attack near-duplicates, DoS on TCP window features,
+     UNSW-NB15 shellcode and reconnaissance on `ct_*` counts, generic on `service`);
+   - improved CICIDS2017: bot and port scan depend on TCP window features (5 of 16 comparisons meet the rule);
+   - the window does not explain the remaining transfer, and bot transfer depends on port scan being in training
+     (a shared internal-host signature is a hypothesis, not a finding).
+3. **Dataset integrity matters as much as the model:** cleaning removes 22% of original CICIDS2017 and 41% of
+   UNSW-NB15 raw rows (repeats and conflicting vectors), and port scan keeps only 1.2% (original) and 3.3%
+   (improved) of its raw rows. Results are therefore reported in three views, with raw rows primary.
+4. **The baseline choice survives a test-free re-check:** nested selection picks rf in 49 of 65 outer folds on the
+   original data and 60 of 60 on the improved pair.
+5. **The autoencoder is not reproducible:** its results change with the PyTorch thread count (port-scan recall
+   0.685, 0.661 and 0.146 across environments), so ae and fused are excluded from later configurations.
+6. **Scoring is now deterministic:** the Random Forest's multithreaded `predict_proba` was not bit-for-bit
+   repeatable. Fixed-order scoring makes rf scores independent of the worker count, and rerunning under the new
+   identity reproduced every rf recall and FPR exactly.
+7. **The exploratory `no_extractor_features` development run failed its reproduction check** and produced no
+   result. It is reported as failed and not reinterpreted.
+
+## Conclusion
+- **What Phase 1 established:** a trustworthy, frozen and reproducible baseline, an evaluation protocol that
+  separates held-out-family performance from dataset shortcuts, and safeguards in code: nested selection, the
+  frozen identity, and a default-deny guard on the external test.
+- **What it did not establish:** any generalization claim. Every Phase 1 number comes from development data that
+  informed decisions, so none is an unbiased estimate. The only source of final claims is the pre-registered,
+  one-time CSE-CIC-IDS2018 evaluation in Phase 5, behind its separate opening authorization.
+- **What it means for Phase 2:** later configurations must beat a baseline whose held-out recall is partly
+  shortcut-driven, so every comparison with Config A uses the same views, shortcut rule and nested selection.
 
 ## Exit criteria
 | Criterion | Status | Evidence |
@@ -48,8 +86,9 @@ authenticate the signer, and anyone with write access could write these fields. 
 reviewed git history, in which the owner commits them. The guard prevents accidental or premature opening of the
 2018 data, not deliberate circumvention. Verifying signed commits would be a separate, later safeguard.
 
-## Remaining before closing
-- Owner's decision: accept this review and declare Phase 1 closed. Config B does not start before then.
+## Closure
+Accepted by the project owner on 2026-11-09. Phase 1 is closed. Phase 2 starts with the Config B design only.
+Configs C, D and E have not started, and the 2018 data stays closed until the Phase 5 opening authorization.
 
 ## Autoencoder (ae, fused)
 - **Finding, 2026-11-09:** the autoencoder is bit-for-bit repeatable at a fixed torch thread count, but changing

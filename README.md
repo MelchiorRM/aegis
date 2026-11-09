@@ -4,7 +4,8 @@ Aegis is a research project on adaptive cyber defense. It asks one question: doe
 co-training a defender against adaptive attackers, combined with opponent modeling, help
 it detect attack families it has never seen?
 
-> **Status: early-stage research, Phase 1 under final review.** The baseline defender (Config A) has
+> **Status: early-stage research. Phase 1 closed on 2026-11-09; Phase 2 is at the Config B design stage.**
+> The baseline defender (Config A) has
 > been measured on CICIDS2017 (original and improved releases) and UNSW-NB15 held-out families, and
 > audited for shortcuts. The audits found shortcut dependencies on both CICIDS2017 releases, so this
 > repository makes no performance claims. Config A is frozen, and the external test (the improved
@@ -63,8 +64,8 @@ Experiments decide the architecture: a component is built into the system only i
 baselines measurably.
 
 **Stage 1, experimental research**
-- [ ] **Phase 1, baseline and integrity:** Config A measured, audited, re-checked by nested selection and frozen on both CICIDS2017 releases and UNSW-NB15; external test pre-registered (under final review)
-- [ ] **Phase 2, adaptive co-training:** traffic realization layer, scripted attacker and Config B; RL attacker, historical league and Config C (RQ1)
+- [x] **Phase 1, baseline and integrity:** Config A measured, audited, re-checked by nested selection and frozen on both CICIDS2017 releases and UNSW-NB15; external test pre-registered ([exit review](docs/phase1-exit-review.md))
+- [ ] **Phase 2, adaptive co-training:** traffic realization layer, scripted attacker and Config B; RL attacker, historical league and Config C (RQ1). Config B design under review
 - [ ] **Phase 3, opponent modeling:** prediction models, Configs D and E (RQ2)
 - [ ] **Phase 4, robustness and ablations:** cross-dataset tests, ablations, prevalence and cost sensitivity (RQ3)
 - [ ] **Phase 5, external evaluation:** one pre-registered evaluation on CSE-CIC-IDS2018, behind a separate opening authorization
