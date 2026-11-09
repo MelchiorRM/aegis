@@ -1,7 +1,8 @@
 # Config B design (Phase 2) — final revised protocol, for review before pre-registration
 
-**Status:** final revision of 2026-11-09, after the owner accepted the feasibility spike
-(`docs/spikes/cage4-feasibility.md`) and set the compute budget. The action-to-family mapping is a draft for
+**Status:** final revision (revision 4) of 2026-11-09, for review. The owner approved the compute plan, the data-budget rule,
+the B/B0 design (subject to the invariant in 3.2.1) and the evidence procedures. These approvals cover design
+only, not execution. The feasibility spike was accepted earlier (`docs/spikes/cage4-feasibility.md`). The action-to-family mapping is a draft for
 review (`docs/config-b-mapping-draft.md`). **Config B implementation and experiments are not authorized.** No
 Config B code, training data or model comparison exists. This protocol is pre-registered and frozen through the
 amendment process before the first Config B experiment. Configs C, D and E have not started. CSE-CIC-IDS2018 stays
@@ -237,7 +238,99 @@ stated and checked.
 - **A:** Config A, unchanged.
 All three arms train on **exactly the same distinct records**: Config A's training rows for the fold, after
 Config A's own per-family cap of 100,000. Replayed copies are added on top of those rows and never displace a real
-row, so B and B0 differ from A only in record weights (2.2).
+row, so B and B0 differ from A only in record weights (2.2). **Approved (owner, 2026-11-09), subject to the
+invariant in 3.2.1.**
+
+#### 3.2.1 The same-records invariant: definition, a discrepancy found, and verification
+**Definition.** For every fold, seed, ratio candidate, inner selection fold and shortcut treatment:
+- A, B and B0 have the same set of distinct training records, and the same feature columns;
+- B and B0 differ from A only in each record's multiplicity, 1 + c_i;
+- every other input to the fit is identical.
+
+**The replay pool, made exact:**
+- **Pool:** the training rows that Config A's own procedure yields for that fold: `holdout_fold`, then
+  `cap_per_family` with the fold's seed. In nested selection, it is the inner fold's capped rows, as in
+  `selection.pair_rows`.
+- **Excluded rows:** rows the cap left out are never drawn, because drawing them would add distinct records that A
+  does not have. This is especially relevant to `dos`, whose training rows exceed the cap.
+- **Shortcut treatments:** replay is computed after each treatment, from that treatment's training rows. A treatment
+  that removes rows (`remove_matching_signatures`) removes them from the pool too. A treatment that drops columns
+  applies to copies, because copies are rows of the same matrix.
+- **Perturbation arm:** it creates new records by definition, so it is outside this invariant. It stays
+  exploratory and is never part of a B, B0 or A contrast.
+
+**Discrepancy found (2026-11-09, reading `src/aegis/models/baseline.py`, not by running anything).** Config A's fit
+path, applied as-is to a training matrix with replayed copies, would break "differ only in weights" in three ways:
+1. **The preprocessor is fitted on the training matrix** (`build_preprocessor(...).fit(X_train)`): a median imputer,
+   a standard scaler, and a one-hot encoder with `min_frequency=20`.
+   - **Encoder:** with copies in the matrix, a rare category of a replayed family (for example a UNSW-NB15
+     `service` value) can cross 20 occurrences and gain its own column. B and B0 would then have a different
+     feature space from A.
+   - **Imputer:** imputed medians would shift with the copies.
+2. **`class_weight="balanced_subsample"`** recomputes class weights in each tree's bootstrap sample.
+   - **With copies:** the extra attack rows are rebalanced away, so replay changes the family composition *within*
+     the attack class, not the class balance.
+   - **With `sample_weight` instead of copies:** sklearn computes those class weights from unweighted counts, so
+     replay would also raise the attack class's total weight.
+   - **So the two encodings are not equivalent,** and the protocol must name one.
+3. **`min_samples_leaf=2` counts rows, not distinct records.** A record and its copy can form a leaf on their own,
+   so replay can let the forest isolate single replayed records.
+
+**Resolution (decided, owner 2026-11-09).** Config A's frozen implementation is not modified. Config B gets its
+own fit wrapper, inside Config B's identity, that:
+- **fits the preprocessor once on the fold's distinct training rows,** with the same rows and the same procedure as
+  Config A (`build_preprocessor(...).fit`, called from Config B code). Those identical fitted parameters
+  (imputer statistics, scaler parameters, encoder categories) are applied to A, B and B0 alike.
+- **encodes replay as integer copies,** option (a):
+  - replayed rows are appended as copies of already preprocessed distinct rows;
+  - the forest is fitted with Config A's exact settings, including `class_weight="balanced_subsample"`, so Config
+    A's class balancing is preserved;
+  - each contrast therefore measures within-attack-class family composition.
+- **Integer sample weights (option b) are not used.**
+- **Accepted limitation:** with `min_samples_leaf=2`, a record and its copy can form a leaf on their own. This is
+  documented and reported with the results.
+
+**Verification.** These checks are automated, run before every fit, and are pass or fail. Any failure stops the
+run before fitting and is reported:
+Any failed invariant **stops execution**. It never triggers an automatic correction, a retry with changed
+inputs, or a silent fallback (owner, 2026-11-09).
+
+1. **Distinct records:** the sets of distinct training row indices of A, B and B0 are equal, and every replayed
+   index lies in A's capped training rows for that fold and treatment.
+2. **Excluded rows:** no replayed index is a validation or test row, a held-out-family row, or a row the cap left
+   out.
+3. **Preprocessing:** the fitted preprocessing parameters are bit-identical across the three arms, and so is the
+   transformed matrix of distinct rows.
+4. **Multiplicities:** each is at least 1. Σ(multiplicity − 1) equals B's realized total for B, and the same total
+   for B0. A's multiplicities are all 1.
+5. **Settings:** the forest settings equal Config A's frozen settings, with seed, `n_jobs` and fixed-order scoring
+   unchanged.
+
+6. **Preprocessing gate on real data:** before the first fit of every stage, the wrapper's fitted preprocessor
+   and its transformed distinct rows for that stage's first fold must equal, bit for bit, what Config A's own
+   `RandomForestBaseline.fit` path produces on the same rows. A mismatch stops the run.
+
+The discrepancy was found at design level, against the current code. No implementation exists, so nothing has
+been verified at run time yet.
+
+#### 3.2.2 Mandatory tests (to be written with the implementation; none exists yet)
+- **Where they run:** in the Aegis test suite, on synthetic data like the existing tests. Every one must pass
+  before any Config B stage runs.
+- **Config A is not touched:** the tests import Config A's code, never patch or modify it, and
+  `tests/test_safeguards.py`'s frozen-identity tests must still pass.
+
+| Test | What it proves |
+|---|---|
+| **T1 Preprocessing reproduction (mandatory, owner)** | On the same distinct rows, the wrapper's fitted preprocessor and transformed matrix equal, bit for bit, Config A's original output: the `build_preprocessor(...).fit(X_train)` then `transform` path inside `RandomForestBaseline.fit`. Numeric and categorical columns are covered, including a category at the `min_frequency=20` boundary and missing values. |
+| **T2 A-arm equivalence** | With zero replay, the wrapper's A arm gives scores bit-identical to Config A's `RandomForestBaseline` (same seed, fixed-order scoring, any `n_jobs`). |
+| **T3 Copies, not weights** | B's training matrix is A's preprocessed matrix plus exact copies of some of its rows. No `sample_weight` is passed to the forest. The forest parameters, including `class_weight="balanced_subsample"` and `min_samples_leaf`, equal Config A's frozen settings. |
+| **T4 Preprocessing not refitted on copies** | Adding copies, even enough to push a rare category past 20, changes neither the fitted preprocessor nor the feature columns. |
+| **T5 Pool boundaries** | Replay never draws a validation or test row, a held-out-family row, or a row the cap left out, in outer folds, inner selection folds and every shortcut treatment. |
+| **T6 Allocation, cap and matching** | B's per-family split follows the event weights. The cap of 4 replays per row truncates without redistributing. Requested, realized and truncated counts are reported. B0's total equals B's realized total, and B0 draws from the whole seen attack pool. Both are seeded and reproducible. |
+| **T7 Invariant failures stop** | Each invariant check (3.2.1, items 1–6) is fed a crafted violation. Each must raise and stop, leaving no partial outputs, with no correction and no fallback. |
+| **T8 Outcome counting** | On a synthetic action log: each executed action is counted once, in-progress steps never; failed attempts that reached a service are counted; unreachable failed exploits and `UNKNOWN` are reported separately, not counted. |
+| **T9 Seed derivation** | Simulator seed = 1000 × fold seed + episode index is unique across all fold seeds (0–4) and episodes (0–49): 250 combinations, seeds 0–4049. The function rejects an episode index of 1000 or more, so uniqueness cannot silently fail. The derivation is written to the manifest. |
+| **T10 Effective sample size** | The Kish computation matches the closed form for cyclic replays (mapping draft, section 4.2), and never exceeds the distinct row count. |
 
 - **A:** Config A, unchanged.
 - **B: simulator-derived family weights.**
@@ -423,11 +516,16 @@ amendment (`frozen_identities.config_b`) before Phase 5.
   - repository commit `8c3c50ca54b176c2de199847944e8dcc035497e3`, metadata version `4.0`, Python 3.12.3, and the full
     dependency lock, including the two pins the spike added (section 1.4 and the spike report);
   - scenario generator and its parameters, episode length, number of episodes per seed;
-  - seed derivation (simulator seed as a fixed function of fold seed and episode index);
+  - **seed derivation, decided (owner, 2026-11-09):**
+    - simulator seed = 1000 × fold seed + episode index, for fold seeds 0–4 and episodes 0–49;
+    - the result is unique across all 250 combinations (seeds 0–4049), checked by T9;
+    - the formula and the full seed list are recorded in the manifest;
+    - every held-out-family fold and inner selection fold of a seed uses that seed's 50 episodes;
   - thread counts pinned.
 - **Agents:**
   - scripted red strategies (the exact finite-state definition or script);
-  - the blue policy during scenario generation (for example `Sleep`, or a fixed scripted policy);
+  - **the blue policy during scenario generation, decided (owner, 2026-11-09):** `Sleep` for all five blue agents,
+    matching B's static defender. Restore-on-alert is not used;
   - green agent parameters, including false-alert rates.
 - **Observation and action definitions:** the wrappers used, action enumeration, invalid-action handling, and the
   observation fields logged.
@@ -491,12 +589,36 @@ amendment (`frozen_identities.config_b`) before Phase 5.
 - revision 1 of the compute plan rejected (over 180), and the determinism check preferred;
 - UNSW-NB15: if nothing is justified, B = A there, and the contrasts are limited to improved CICIDS2017.
 
-**Open for the owner:**
-1. **Evidence steps E1, E2 and E4** (exact procedures in the draft, section 5), and the optional E1b. None is
-   approved, and E3 is withdrawn. Also the reading of "held-out-family records" in constraint 4.
-2. **The precise B and B0 documentation** (2.2, 3.2), including the revised data budget: replays are added on
-   top, and all arms share the same distinct rows.
-3. **The revised compute plan** (3.5): the 152.2 CPU-h ceiling, the stop rules, and the fresh audit of A.
+**Recorded, revision 3 (owner, 2026-11-09):** approved for design and evidence procedures only, not for
+execution.
+- the revised compute plan, 152.2 CPU-h: three ratio candidates, the full determinism rerun, a fresh shortcut audit
+  of A, every stop rule kept, and no silent scope reduction;
+- the corrected real-record cap, with replays added on top, and equal realized replay totals for B and B0;
+- the revised B and B0 design, subject to the same-records invariant (3.2.1);
+- E1, E2 and E4 procedures, under the reading that training-partition records may be read when they are never
+  validation or test records in the relevant fold. No validation or test record, no row-level inspection, no
+  numeric feature and no model;
+- E1b deferred: no download or inspection of the UNSW-NB15 ground-truth table without separate approval;
+- every UNSW-NB15 mapping stays provisional, and none is promoted on insufficient evidence;
+- Config A is immutable.
+
+**Recorded, revision 4 (owner, 2026-11-09):**
+- replay is encoded as integer copies, Config A's class balancing is preserved, and the minimum-leaf duplication
+  effect is a documented limitation. Sample weights are not used;
+- the Config B wrapper is approved: preprocessing is fitted on distinct training records, with identical
+  parameters for A, B and B0. T1 is mandatory. Config A's frozen implementation is not modified;
+- every pre-fit invariant check is kept, and any failure stops execution, with no correction or fallback;
+- blue policy `Sleep` during scenario generation;
+- simulator seeds = 1000 × fold seed + episode index, episodes 0–49. Uniqueness is verified and recorded in the
+  manifest;
+- E1, E2 and E4 are approved at design level only, and **not authorized to execute.** E1b is deferred and E3
+  withdrawn.
+
+**Next approvals needed, in order:**
+1. Execution of E1, E2 and E4.
+2. The final mapping, once the evidence is in.
+3. The pre-registration amendment that freezes this protocol.
+4. Authorization to implement and run Config B.
 
 Nothing is frozen, and nothing runs. No Config B implementation, training data or model run starts before these decisions, the pre-registration
 amendment and the freeze.

@@ -1,6 +1,6 @@
 # Config B action-to-family mapping — DRAFT, revision 2, for owner review
 
-**Status: draft, not frozen, not used.**
+**Status: draft, not frozen, not used.** Revision 2 stands, with the owner's 2026-11-09 approvals recorded in section 5.
 - **History:** revision 1 was drafted on 2026-11-09. Revision 2 (also 2026-11-09) applies the owner's decisions on
   revision 1.
 - **What has not happened:** no training data was generated, no record was replayed, no model was run, no dataset
@@ -136,7 +136,19 @@ Seed-0 counts are attempts executed (successful).
 - **`web_attack`'s ESS stays at its 62 distinct rows** throughout.
 - **UNSW-NB15:** nothing is mapped, so B = A in every fold.
 
-## 5. Evidence steps — exact procedures for review (not approved, none run)
+## 5. Evidence steps — exact procedures
+**Status (owner, 2026-11-09):**
+- **E1, E2 and E4 procedures: approved.**
+  - **Reading of constraint 4:** training-partition records may be read when they are never validation or test
+    records in the relevant fold.
+  - **Not permitted:** no validation or test record, no row-level inspection, no numeric feature access, and no
+    model execution.
+- **E1b: deferred.**
+- **E3: withdrawn.**
+- **Run status:** approved at design level only, and **not authorized to execute** (owner, 2026-11-09). None
+  has been run.
+- **Provisional entries:** every UNSW-NB15 entry stays provisional. A decision rule that is not clearly met leaves
+  the entry unmapped, with no automatic promotion.
 **Common constraints for every step:**
 1. **Training partition only.** E2 and E4 read only rows in `make_partition(ds.family, seed=0, val_fraction=0.2,
    test_fraction=0.2).train`, with the frozen split code unchanged.
@@ -153,9 +165,7 @@ Seed-0 counts are attempts executed (successful).
    - Training-partition rows are never validation or test rows in any fold. `holdout_fold` drops the held-out
      family's training rows and tests on `partition.test`.
    - Evidence about family F is used only to decide F's mapping. When F is held out, that mapping selects nothing.
-   - **Please confirm this reading of "held-out-family records."** If you mean that no record of any family that is
-     ever held out may be read, then E2 cannot run: `exploits` is an eligible held-out family. The UNSW-NB15
-     provisional entries would then stay unmapped.
+   - **Confirmed by the owner (2026-11-09).**
 5. **Logs:** the dataset files' sha256, the commit, the identity check output, the seed, and the counts, written to
    `results/config_b_evidence/<step>/` (gitignored). Each step's decision rule (below) is fixed before it runs.
 
