@@ -1,13 +1,13 @@
 # Pre-registration amendment: Config B development protocol
 
-**Status: DRAFT FOR OWNER REVIEW, NOT SIGNED, NOT FROZEN.** Revision 2 of 2026-11-10.
+**Status: REGISTERED** (owner, 2026-11-10T07:51:06Z). Revision 2 of 2026-11-10.
 - **Revision 1** was the first draft.
 - **Revision 2** records the owner's decisions on revision 1's open questions: the perturbation arm is excluded,
   there is no minimum effect size, and 71.5 CPU-h is the approved planning budget. It also adds the separation of
-  the fold groups. It becomes binding only when the
-project owner fills in `registered_by` and `registered_utc` in [`config_b.json`](config_b.json). Until then:
-- nothing in it is frozen;
-- no Config B code is written, no training data is generated, and no Config B experiment runs.
+  the fold groups. It became binding when the
+project owner filled in `registered_by` and `registered_utc` in [`config_b.json`](config_b.json). Signing freezes
+the protocol, the mapping, the bank and the analysis. It does not authorize implementation, training data or
+experiments, which need separate authorization (section 13).
 
 After signing, any change is a dated amendment with a reason, made before the stage it affects. A change made after
 any Config B result exists is reported as a post-hoc deviation.
@@ -449,7 +449,7 @@ with no correction, retry or fallback:
    the effect of the specified replay-composition policies (6.1).
 5. **The scenario bank incident** is accepted as verification only (`docs/issue_history.md`, issue 26).
 
-**Open questions:** none. **Not authorized:** signing, freezing, implementation, training data or experiments.
+**Open questions:** none. **Not authorized:** implementation, training data or experiments.
 
 ## Signature
 Recorded in `config_b.json` (`registered_by`, `registered_utc`). These are attestations, not cryptographic

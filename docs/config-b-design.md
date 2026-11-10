@@ -11,9 +11,9 @@
   - the held-out-family limitation of B − B0 (3.2.4);
   - the structure of the inner selection folds;
   - removal of duplicated and stale text.
-- **The governing document:** the pre-registration amendment that would freeze this protocol is drafted for review
-  in `docs/preregistration/config_b.md` (with `config_b.json`). **It is not signed.** Where it differs from this
-  design, the amendment governs.
+- **The governing document:** the pre-registration amendment that freezes this protocol,
+  `docs/preregistration/config_b.md` (with `config_b.json`). **Signed by the owner 2026-11-10T07:51:06Z.** Where it
+  differs from this design, the amendment governs.
 - **Earlier approvals:** the compute plan, the data-budget rule, the B/B0 design (subject to the invariant in 3.2.1),
   the evidence procedures and the final two-family mapping. They cover design only, not execution. The feasibility
   spike was accepted earlier (`docs/spikes/cage4-feasibility.md`).

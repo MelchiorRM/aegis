@@ -1,10 +1,10 @@
 {
-  "status": "draft for owner review; not signed; not frozen",
+  "status": "registered",
   "name": "Config B development protocol (pre-registration amendment)",
   "plan": "docs/preregistration/config_b.md",
   "drafted": "2026-11-10",
-  "registered_by": null,
-  "registered_utc": null,
+  "registered_by": "MelchiorRM",
+  "registered_utc": "2026-11-10T07:51:06Z",
   "not_an_amendment_to": "docs/preregistration/cse_cic_ids2018.json (Config B's identity reaches it only by a later signed amendment carrying frozen_identities.config_b, before Phase 5)",
   "frozen_config_a": "25685b84dd83f65c",
   "config_b_identity": null,
@@ -226,7 +226,6 @@
     "planning_ceiling_153": "hard limit (see hard_limits)"
   },
   "not_authorized": [
-    "signing or freezing",
     "Config B implementation",
     "training data generation",
     "experiments",
