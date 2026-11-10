@@ -241,5 +241,50 @@
     "4. two-family, single-family and neither-family folds kept separate; results described as effects of the specified replay-composition policies",
     "5. scenario bank accidental run accepted as verification only (docs/issue_history.md, issue 26)"
   ],
-  "open_decisions": []
+  "open_decisions": [],
+  "amendments": [
+    {
+      "number": 1,
+      "date": "2026-11-10",
+      "status": "draft; not signed",
+      "amends": "section 8 (seen-fold ratio) and section 12 (stage order and stage ceilings)",
+      "reason": "two gaps found while implementing the stage runner, before any Config B fit on real data",
+      "G1_seen_fold_ratio": {
+        "proposed": "B and B0 use the default 0.25 in the seen fold",
+        "limitation": "degradation compares a held-out fit at the selected ratio with a seen fit at 0.25; primary contrast unaffected",
+        "alternative_not_proposed": "a seen fit per selected ratio, about +2 CPU-h"
+      },
+      "G2_stage_order": {
+        "proposed": "stage 1 fits arm A only for seed 0; B and B0 seed-0 outer folds move to stage 3",
+        "stage_ceilings": {
+          "1": 0.506667,
+          "3": 7.307588
+        },
+        "total_unchanged_cpu_hours": 68.8
+      },
+      "recorded_no_change": [
+        "bank: 1,250 UNKNOWN outcomes, all on Sleep; O6 applied explicitly; counts equal the manifest; no non-Sleep O1",
+        "ledger measures each fit with its scoring, each inner fold, and dataset loading; failed fits recorded"
+      ],
+      "amended_by": null,
+      "amended_utc": null
+    }
+  ],
+  "identity_addendum": {
+    "status": "draft; not signed",
+    "config_b_identity": "3730788cdb4312d3",
+    "command": "python -m aegis.config_b.identity",
+    "covers": [
+      "Config A 25685b84dd83f65c",
+      "src/aegis/config_b/*.py (9 files)",
+      "experiments/artifacts.py, experiments/baseline.py, experiments/selection.py",
+      "bank manifest sha256, mapping, protocol constants (with amendment 1 as proposed)"
+    ],
+    "tests": "tests/test_config_b.py 45 passed; full suite 217 passed",
+    "records_hashes_only": true,
+    "signed_by": null,
+    "signed_utc": null
+  },
+  "stage_authorizations": [],
+  "compute_approvals": []
 }

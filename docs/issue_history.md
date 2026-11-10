@@ -217,6 +217,36 @@ document or record it rests on. Failed runs stay preserved and are never reinter
 - **Recommendation:** give scripts that write records an argument parser, and a `--write` flag for the write. Read
   a script's source, not `--help`, when its interface is unknown.
 
+### 27. Two protocol gaps found while implementing the stage runner (draft amendment 1)
+- **What happened:** the registered protocol could not be executed as written in two places:
+  - **G1:** the selection rule gives no ratio to the seen fold;
+  - **G2:** stage 1 fits B's and B0's outer folds before their ratios are selected in stage 2.
+- **Found:** by writing the runner against the protocol, before any Config B fit on real data.
+- **Fix, proposed:** Config B amendment 1 (draft, unsigned):
+  - the seen fold uses the default 0.25;
+  - stage 1 fits arm A only, and B's and B0's seed-0 outer folds move to stage 3.
+  - The compute total is unchanged. The runner refuses every stage until the amendment is signed.
+- **Recommendation:** dry-run a protocol's stage order and every fit's inputs on paper, or in code on synthetic
+  data, before registering it.
+
+### 28. UNKNOWN outcomes in the scenario bank (no effect; recorded)
+- **What happened:** the bank has 1,250 red steps with outcome UNKNOWN. The seed-0 check had found none.
+- **Finding:** every one of them is a `Sleep` action (5 per episode), and `Sleep` is never counted. No count
+  changes. The Config B counter applies O6 explicitly, and its counts equal the manifest's.
+- **Recommendation:** check outcome rules on the whole bank, not one episode.
+
+### 29. Measured CPU would have left out scoring and loading (fixed before the identity)
+- **What happened:** the first draft of the ledger timed only preprocessing and forest fitting. Scoring the test
+  and raw rows, and loading the dataset, went unmeasured. That would understate measured CPU against the budget.
+- **Fix:** the ledger now measures each fit with its scoring, each inner selection fold, dataset loading, and
+  failed fits.
+
+### 30. Notebooks rebuilt after adding the Config B package
+- **What happened:** the three Colab notebooks embed the whole `aegis` package, and their tests check it is
+  current. Adding `src/aegis/config_b/` made them stale.
+- **Fix:** rebuilt with their builders, the documented procedure. Only the embedded source changes. Config A's
+  frozen identity is unchanged.
+
 ## Recurring lessons
 1. **Exact reproduction first.** Rerun before reporting, and treat thread order, library versions and indices as
    suspects.

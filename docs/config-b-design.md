@@ -783,11 +783,15 @@ execution.
 - **the accidental scenario-bank builder run is accepted as verification only** (`docs/issue_history.md`, issue 26).
 
 **Next approvals needed, in order:**
-1. **Final review of the pre-registration amendment** (`docs/preregistration/config_b.md`, revision 2), then
-   signature.
-2. **Authorization to implement Config B** (wrapper, replay, invariants, tests T1–T10), then the identity
-   addendum.
-3. **Authorization to run stages 1–5.**
+1. ~~Final review and signature of the pre-registration amendment~~: **done**, registered by the owner
+   2026-11-10T07:51:06Z (commit `164651d`).
+2. ~~Authorization to implement Config B~~: **done** (owner, 2026-11-10). Implemented in `src/aegis/config_b/`.
+   T1–T10 and the runner's safeguards are in `tests/test_config_b.py`, and the full suite passes. No real-data fit
+   has run.
+3. **Sign Config B amendment 1** (G1: the seen-fold ratio; G2: stage 1 fits A only), drafted in
+   `docs/preregistration/config_b.md`.
+4. **Sign the identity addendum** (Config B identity in `config_b.json`).
+5. **Authorize stages,** recorded in `stage_authorizations`. The runner refuses any stage not listed there.
 
 Nothing is frozen, and nothing runs. No Config B implementation, training data or model run starts before these decisions, the pre-registration
 amendment and the freeze.

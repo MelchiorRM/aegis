@@ -454,3 +454,59 @@ with no correction, retry or fallback:
 ## Signature
 Recorded in `config_b.json` (`registered_by`, `registered_utc`). These are attestations, not cryptographic
 signatures, as for the CSE-CIC-IDS2018 pre-registration.
+
+## Amendments
+Each amendment is dated, given a reason, signed in `config_b.json`, and made before the stage it affects. The text
+above stays as registered (`registered_utc` 2026-11-10T07:51:06Z). Where an amendment changes a requirement, the
+amendment governs. **The runner refuses every stage while any amendment is unsigned.**
+
+### Amendment 1, 2026-11-10 (DRAFT, NOT SIGNED): two gaps found during implementation
+**Reason.** Writing the stage runner exposed two places where the registered protocol cannot be executed as written.
+Both were found by reading the protocol against the code, before any Config B fit on real data. No result exists.
+
+**G1. The seen fold's replay ratio.**
+- **Gap:** section 8 selects each arm's ratio per outer *held-out* family. The seen fold, with every family in
+  training, has no held-out family, so the rule gives it no ratio. B's and B0's seen fits are needed for the
+  secondary degradation contrast (9.2), and the compute plan charges them.
+- **Proposed:** B and B0 use the rule's fixed default, **0.25**, in the seen fold.
+  - No data enters the choice, and the compute plan is unchanged.
+  - **Limitation, reported with the degradation table:** a held-out fit at a selected ratio r ≠ 0.25 is then
+    compared with a seen fit at 0.25.
+  - The primary contrast (B − B0 on held-out folds) is unaffected.
+- **Alternative (not proposed):** fit a seen model at every ratio selected for any family in that seed, and pair
+  each family with the matching one. That adds up to about 2 CPU-h, inside 71.5 but close to it.
+
+**G2. The order of stages 1 and 2.**
+- **Gap:** stage 1 fits seed 0's outer folds for A, B and B0 "kept as part of stage 3". B's and B0's outer fits
+  need their selected ratios, which only exist after stages 2a and 2b.
+- **Proposed:** stage 1 fits **arm A only** for seed 0 (the seen fold plus four held-out folds). B's and B0's seed-0
+  outer folds move to stage 3, which becomes "A seeds 1–4; B and B0 seeds 0–4".
+  - The calibration ratio comes from A's fits. Replay arms are at most about 4% larger, and the ratio is
+    re-measured before every later stage.
+  - **Compute:** stage 1's ceiling becomes 0.51 CPU-h and stage 3's becomes 7.31. The total is unchanged (68.8),
+    and so are the budget (71.5) and every stop rule.
+
+**Also recorded, with no change to the protocol:**
+- **O6 in the bank.** The bank has 1,250 red steps with outcome UNKNOWN (5 per episode), all of them `Sleep`.
+  `Sleep` is never counted, so they change no count. The code applies O6 explicitly, and recomputes counts equal
+  to the manifest. Under the outcome rules, the bank also has no non-`Sleep` in-progress action (O1).
+- **What the ledger measures.** CPU is measured over each fit *and its scoring*, over each inner selection fold
+  as a whole, and over loading and cleaning the dataset. A failed fit's CPU is recorded too. That is more than
+  "before and after every fit" (section 12), so measured CPU is not understated.
+
+**Status:** draft. It takes effect only when signed in `config_b.json` (`amendments[0].amended_by`,
+`amended_utc`). If G1 or G2 is decided differently, the code changes before the identity addendum is signed.
+
+### Identity addendum (DRAFT, NOT SIGNED)
+- **What it records:** hashes only. It changes no protocol content (section 13).
+- **Config B identity: `3730788cdb4312d3`** (`python -m aegis.config_b.identity`). It covers:
+  - Config A `25685b84dd83f65c` (digest of the frozen identity);
+  - the nine files of `src/aegis/config_b/`;
+  - the reused, unfrozen Config A experiment code: `experiments/artifacts.py`, `experiments/baseline.py` and
+    `experiments/selection.py`;
+  - the bank manifest hash, the mapping and every protocol constant, including G1 and G2 as proposed.
+- **Tests:** T1–T10 and the runner's safeguards (`tests/test_config_b.py`, 45 tests) pass on synthetic data, and
+  so does the full suite (217 tests).
+- **Order:** amendment 1 is signed first. If it changes anything, the identity is recomputed and this addendum
+  redrafted. Then the addendum is signed, and stage authorizations are recorded separately in
+  `stage_authorizations`.
