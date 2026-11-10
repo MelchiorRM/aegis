@@ -198,6 +198,25 @@ document or record it rests on. Failed runs stay preserved and are never reinter
 - **Recommendation:** label every estimate as either a ceiling or a point estimate, and replace each with a
   measurement as soon as one exists.
 
+### 26. Scenario bank builder run by accident (verification only; accepted by the owner)
+- **What happened:** on 2026-11-10, while the pre-registration amendment was being drafted, `python -I
+  spikes/config_b_evidence/scenario_bank.py --help` was run to read its options. The script takes no arguments and
+  ignored the flag. It ran in full and rewrote `scenario_bank_manifest.json`.
+- **Verification:** the script stops on any mismatch and writes the manifest only after every check passes. It
+  completed, so all 250 logs were re-read and passed:
+  - each summary's seed, step count (499) and blue policy (`sleep`) were checked;
+  - the counts recomputed from the logs equalled the earlier summary;
+  - each log's sha256 was recomputed.
+- **Outcome:**
+  - the rewritten manifest is byte-identical, with sha256
+    `11021c5d6371f7744962b2b868e3b86052d28e32a02a0a5aea6c0203f13c222e` before and after;
+  - `git status` was unchanged (clean for the manifest);
+  - no bank log was written, because the script only reads them.
+- **Status:** accepted by the owner (2026-11-10) as a verification-only incident. No simulation ran, no data was
+  generated, and nothing else changed.
+- **Recommendation:** give scripts that write records an argument parser, and a `--write` flag for the write. Read
+  a script's source, not `--help`, when its interface is unknown.
+
 ## Recurring lessons
 1. **Exact reproduction first.** Rerun before reporting, and treat thread order, library versions and indices as
    suspects.

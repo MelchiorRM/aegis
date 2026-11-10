@@ -1,5 +1,8 @@
 # Config B action-to-family mapping — revision 3 (final mapping approved, not yet frozen)
 
+**Freezing:** the final mapping below is carried into the pre-registration amendment drafted for review in
+`docs/preregistration/config_b.md` (section 5). It is frozen only when that amendment is signed.
+
 ## Final mapping (owner, 2026-11-10)
 **Improved CICIDS2017, a two-family intervention:**
 
