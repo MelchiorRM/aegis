@@ -35,7 +35,7 @@ def current_identity() -> dict:
     constants = {
         name: getattr(protocol, name) for name in (
             "DATASET", "HELD_OUT_FAMILIES", "FOLD_SEEDS", "EPISODES_PER_FOLD_SEED", "BANK_MANIFEST_SHA256",
-            "MAPPED_FAMILIES", "ARMS", "MAX_REPLAYS_PER_ROW", "RATIOS", "RULE_TREATMENTS", "OUTSIDE_RULE",
+            "MAPPED_FAMILIES", "ARMS", "MAX_REPLAYS_PER_ROW", "RATIOS", "SEEN_FOLD_RATIO", "RATIO_BASIS", "RULE_TREATMENTS", "OUTSIDE_RULE",
             "STAGES", "STAGE_CEILINGS", "APPROVED_PLANNING_BUDGET", "PLANNING_CEILING", "IN_STAGE_STOP", "HARD_STOP",
         )
     }

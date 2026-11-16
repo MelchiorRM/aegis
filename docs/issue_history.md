@@ -226,6 +226,8 @@ document or record it rests on. Failed runs stay preserved and are never reinter
   - the seen fold uses the default 0.25;
   - stage 1 fits arm A only, and B's and B0's seed-0 outer folds move to stage 3.
   - The compute total is unchanged. The runner refuses every stage until the amendment is signed.
+- **Status:** both resolutions approved by the owner, and amendment 1 signed by MelchiorRM at
+  2026-11-10T11:39:06Z (issue 31).
 - **Recommendation:** dry-run a protocol's stage order and every fit's inputs on paper, or in code on synthetic
   data, before registering it.
 
@@ -246,6 +248,70 @@ document or record it rests on. Failed runs stay preserved and are never reinter
   current. Adding `src/aegis/config_b/` made them stale.
 - **Fix:** rebuilt with their builders, the documented procedure. Only the embedded source changes. Config A's
   frozen identity is unchanged.
+
+### 31. Implementation and synthetic-data testing before final authorization (recorded at the owner's request)
+- **What happened, in order (2026-11-10):**
+  1. The owner registered the Config B amendment (07:51:06Z, commit `164651d`).
+  2. The owner chose "Authorize implementation" in a dialog. Its stated scope: write the Config B code and tests
+     T1–T10 on synthetic data, run the test suite, and draft the identity addendum for signature. Stages 1–5 kept
+     their own authorization.
+  3. While writing the runner, two gaps were found where the registered protocol could not be executed (issue 27).
+     **Both were resolved in code as proposed (G1: seen fold at 0.25; G2: stage 1 fits A only) before the owner had
+     decided them.** They were drafted as amendment 1 at the same time.
+  4. The code was tested on synthetic data: 45 Config B tests, 217 in the full suite. After this session's
+     changes the counts are 46 and 218; one ledger test was added.
+  5. The owner approved both resolutions afterwards. At the time this entry was first written, the amendment was
+     not yet signed.
+  6. The owner then signed amendment 1 and the identity addendum (MelchiorRM, 2026-11-10T11:39:06Z; Config B
+     identity `7b900fea59b6cf35`). No stage is authorized yet.
+- **So implementation and synthetic-data testing took place before final authorization.** At that time:
+  - the protocol the code implements was not final, because amendment 1 was undecided and unsigned;
+  - the identity addendum was unsigned;
+  - no stage was authorized.
+  The dialog in step 2 did not cover protocol decisions. This entry does not treat the G1 and G2 code as authorized
+  when it was written.
+- **What did not happen:**
+  - no real-data fit;
+  - no training-data generation;
+  - no experiment or model comparison;
+  - no change to Config A, which still matches `25685b84dd83f65c`.
+- **The execution guard refused stage 1.** `python -m aegis.config_b.experiment --stage 1` raised
+  `PermissionError` both times it was run:
+  - during implementation: "no identity addendum signed by the owner; no stage may run";
+  - re-run after the owner's decision: "Config B amendment 1 is not signed by MelchiorRM".
+  The guard runs before the bank check and the data load, so no data was read. No `results/config_b` folder
+  exists. `results/config_b_evidence` is the earlier, approved mapping-evidence output.
+- **Synthetic-data verification after the owner's decision.** It ran all stages twice on synthetic data
+  (scratchpad script, not part of the repository). It is not real-data validation:
+  - **Replay partition isolation:** 252 replay sets checked (outer, audit and inner contexts; B and B0; all three ratios). All are inside their training rows, and none is in validation, test, cap-excluded rows, the held-out family or benign.
+  - **Exact B/B0 replay-count matching:** in all 32 B0 outer and audit rows, B0's replay total equals B's realized total at the same ratio, on recomputation as well. All 144 inner-fold rows are equal, and so are the 58 rows where B and B0 used the same ratio.
+  - **Determinism:** the stage-5 rerun matched 96 rows with 0 differences. A second, independent full run matched all 192 result rows exactly, and its selections and contrasts were identical.
+  - **CPU accounting:** the ledger held only about 90% of the process's CPU. That was a defect, fixed in issue 32.
+- **Recommendation:** when implementation finds a protocol gap, stop and bring the gap to the owner before coding
+  a resolution. Code written against an undecided resolution is provisional, and should be labelled that way.
+
+### 32. The ledger missed CPU spent outside fits (found by the verification; fixed before the identity)
+- **What happened:** the synthetic verification (issue 31) compared the ledger with the process's measured CPU.
+  The ledger held only about 90% of it (318.9 of 352.1 s, and 305.8 of 339.3 s, in two runs).
+- **The missing CPU** was spent outside fits:
+  - stage bookkeeping and saving;
+  - the selection tables;
+  - the determinism comparison;
+  - the bootstrap report;
+  - on the command line, interpreter start, the guard and the bank check.
+  On real data, where fits dominate, the share would be smaller, but the budget is enforced on measured CPU, so the
+  ledger must hold all of it.
+- **Fix:**
+  - each stage records its CPU outside fits as one row, with what the fits inside it recorded subtracted, so
+    nothing is counted twice;
+  - the report step is measured;
+  - the command line records the rest of the process on exit.
+  - A test checks the arithmetic with a fake clock. The synthetic end-to-end test checks that the ledger equals the
+    run's process CPU to within 1%.
+- **Re-verified:** in two full synthetic runs, the ledger holds 100.0% of the process's CPU (260.2 of 260.2 s, and 233.8 of 233.8 s). The 0.01 s outside it is the test loop between stages.
+- **Effect:** `compute.py` and `experiment.py` changed, so the Config B identity changed. The unsigned draft
+  addendum was redrafted, and that redraft (identity `7b900fea59b6cf35`) is the one the owner signed at
+  2026-11-10T11:39:06Z.
 
 ## Recurring lessons
 1. **Exact reproduction first.** Rerun before reporting, and treat thread order, library versions and indices as

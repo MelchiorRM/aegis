@@ -2,6 +2,10 @@
 
 CPU is the process's own user plus system time (``RUSAGE_SELF``, which includes the forest's threads) plus
 ``RUSAGE_CHILDREN`` for any joined child process. The bank's 3.24 CPU-h counts as already spent.
+
+Accounting is complete: besides one row per fit, each stage records its CPU outside fits (bookkeeping, saving,
+selection tables, the determinism comparison), the report step is measured, and the command line records the rest
+of the process (interpreter start, the guard and the bank check), so the ledger sums to the process's whole CPU.
 """
 
 from __future__ import annotations
@@ -52,6 +56,7 @@ class Ledger:
         self.approved_budget = approved_budget
         self.past_planning_ceiling = past_planning_ceiling  # Only an explicit owner authorization sets this.
         self.rows: list[dict] = []
+        self.recorded_here = 0.0  # CPU seconds recorded by this process, for the process remainder.
         if path.exists():
             with open(path, newline="", encoding="utf-8") as handle:
                 self.rows = [dict(r, cpu_seconds=float(r["cpu_seconds"]), wall_seconds=float(r["wall_seconds"]))
@@ -112,19 +117,37 @@ class Ledger:
         try:
             yield
         finally:  # A fit that fails still spent CPU, so it is recorded too.
-            row = {"stage": stage, "label": label, "cpu_seconds": cpu_seconds() - cpu,
-                   "wall_seconds": time.perf_counter() - wall,
-                   "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-            self.rows.append(row)
-            new = not self.path.exists()
-            with open(self.path, "a", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=self.FIELDS)
-                if new:
-                    writer.writeheader()
-                writer.writerow(row)
+            self.record(stage, label, cpu_seconds() - cpu, time.perf_counter() - wall)
         if self.total_hours() >= protocol.IN_STAGE_STOP:
             raise StopRun(f"measured CPU {self.total_hours():.2f} h reached {protocol.IN_STAGE_STOP:.0f}; "
                           f"stopped at the fit boundary after {label}")
+
+    def record(self, stage: str, label: str, cpu: float, wall: float) -> None:
+        row = {"stage": stage, "label": label, "cpu_seconds": cpu, "wall_seconds": wall,
+               "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        self.rows.append(row)
+        self.recorded_here += cpu
+        new = not self.path.exists()
+        with open(self.path, "a", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=self.FIELDS)
+            if new:
+                writer.writeheader()
+            writer.writerow(row)
+
+    @contextmanager
+    def outside_fits(self, stage: str, label: str):
+        """Record a span's CPU minus what fits inside it already recorded, so nothing is counted twice."""
+        cpu, wall, before = cpu_seconds(), time.perf_counter(), self.recorded_here
+        try:
+            yield
+        finally:
+            self.record(stage, label, max(0.0, cpu_seconds() - cpu - (self.recorded_here - before)),
+                        time.perf_counter() - wall)
+
+    def record_process_remainder(self, stage: str) -> None:
+        """Everything this process spent that no other row holds: interpreter start, imports, guard, bank check."""
+        self.record(stage, "process remainder (start, guard, bank check, exit)",
+                    max(0.0, cpu_seconds() - self.recorded_here), 0.0)
 
     def end_stage(self, stage: str) -> None:
         children = live_children()

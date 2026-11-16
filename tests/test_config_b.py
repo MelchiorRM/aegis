@@ -15,7 +15,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 from aegis.config import BaselineConfig, DatasetConfig, RandomForestConfig
 from aegis.config_b import analysis, bank, identity, model as cb_model, protocol
-from aegis.config_b.compute import Ledger, StopRun
+from aegis.config_b.compute import Ledger, StopRun, cpu_seconds
 from aegis.config_b.experiment import Runner, prepare
 from aegis.config_b.model import (
     FingerprintRegistry, InvariantViolation, ReplayForest, check_replay_rows, check_settings,
@@ -401,9 +401,12 @@ def test_in_stage_stop_at_175_happens_at_a_fit_boundary(tmp_path):
 def finished_run(prepared, tmp_path_factory):
     out = tmp_path_factory.mktemp("config_b")
     runner = Runner(prepared, small_config(), out, EVENTS, Ledger(out / "compute_ledger.csv"), log=lambda _: None)
+    start = cpu_seconds()
     for stage in protocol.STAGES:
         runner.run_stage(stage)
-    return runner, runner.report(), out
+    summary = runner.report()
+    runner.process_cpu = cpu_seconds() - start
+    return runner, summary, out
 
 
 def test_runner_stages_in_order_and_refuses_skipping(prepared, tmp_path):
@@ -439,10 +442,28 @@ def test_runner_end_to_end(finished_run):
     assert json.loads((out / "determinism.json").read_text())["passed"] is True
     assert {"A", "B", "B0"} <= set(pd.read_csv(out / "shortcut_effects.csv")["arm"])
     seen = results[results["fold"] == "seen"]
-    assert (seen[seen["arm"] != "A"]["ratio"] == 0.25).all()  # Proposed amendment 1 (G1).
+    # Amendment 1 (G1): the seen fold uses the fixed default 0.25, labelled as such and never as a selected ratio.
+    assert (seen[seen["arm"] != "A"]["ratio"] == 0.25).all()
+    assert set(seen[seen["arm"] != "A"]["ratio_basis"]) == {"fixed_default"}
+    assert set(held[held["arm"] != "A"]["ratio_basis"]) == {"selected"}
+    assert set(results[results["arm"] == "A"]["ratio_basis"]) == {"none"}
+    degradation = pd.read_csv(out / "degradation.csv")
+    b_rows = degradation[degradation["contrast"] == "B - B0"]
+    assert b_rows["seen_B"].str.endswith(":fixed_default").all() and b_rows["held_B"].str.contains(":selected").all()
     ledger = pd.read_csv(out / "compute_ledger.csv")
-    assert set(ledger["stage"]) == set(protocol.STAGES)
-    assert set(ledger[ledger["stage"] == "1"]["label"].str.split(":").str[0]) == {"A"}  # Proposed amendment 1 (G2).
+    assert set(ledger["stage"]) == {*protocol.STAGES, "report"}
+    # Complete accounting: every stage and the report record their CPU outside fits, and the ledger covers the
+    # whole CPU of the run (the loop between stages is all that is left outside).
+    outside = ledger[~ledger["label"].str.contains(":")]
+    assert sorted(outside["stage"]) == sorted([*protocol.STAGES, "report"])
+    assert ledger["cpu_seconds"].sum() == pytest.approx(runner.process_cpu, rel=0.01)
+    ledger = ledger[ledger["label"].str.contains(":")]  # Fit rows only, below.
+    # Amendment 1 (G2): stage 1 fits arm A only; B's and B0's seed-0 outer folds are fitted in stage 3.
+    arms_of = lambda stage: ledger[ledger["stage"] == stage]["label"]
+    assert set(arms_of("1").str.split(":").str[0]) == {"A"}
+    assert arms_of("1").str.endswith("seed0").all()
+    for arm in ("B", "B0"):
+        assert arms_of("3").str.match(rf"{arm}:reference:.*:seed0$").sum() == 1 + len(protocol.HELD_OUT_FAMILIES)
 
 
 def test_arm_a_rows_equal_the_artifact_audit_rows(prepared, finished_run):
@@ -524,11 +545,11 @@ def test_no_stage_runs_without_a_signed_identity_addendum_and_stage_authorizatio
 
 
 def test_the_registered_amendment_has_no_stage_authorized():
-    with pytest.raises(PermissionError, match="amendment 1 is not signed"):  # Draft amendment 1 keeps every stage closed.
+    with pytest.raises(PermissionError, match="stage 1 is not authorized"):  # Signed, but no stage authorized yet.
         identity.authorization("1")
     record = json.loads(protocol.AMENDMENT.read_text(encoding="utf-8"))
-    assert record["identity_addendum"]["config_b_identity"] == identity.digest()  # The draft names the current code.
-    assert record["identity_addendum"]["signed_by"] is None and record["stage_authorizations"] == []
+    assert record["identity_addendum"]["config_b_identity"] == identity.digest()  # The signature names the current code.
+    assert record["identity_addendum"]["signed_by"] == "MelchiorRM" and record["stage_authorizations"] == []
 
 
 def test_protocol_constants_agree_with_the_registered_amendment():
@@ -544,9 +565,33 @@ def test_protocol_constants_agree_with_the_registered_amendment():
         protocol.APPROVED_PLANNING_BUDGET, protocol.IN_STAGE_STOP, protocol.HARD_STOP)
     assert sum(protocol.STAGE_CEILINGS.values()) == pytest.approx(compute["worst_case_cpu_hours"] - 3.24, abs=0.06)
     assert "6" not in protocol.STAGES and "excluded" in record["perturbation_arm"]
+    # Amendment 1: the code implements exactly the recorded G1 and G2 resolutions.
+    g1, g2 = record["amendments"][0]["G1_seen_fold_ratio"], record["amendments"][0]["G2_stage_order"]
+    assert g1["ratio"] == protocol.SEEN_FOLD_RATIO == protocol.RATIOS[0] and g1["fixed_default_not_selected"]
+    assert g1["output_label"]["seen_fold_B_B0"] == protocol.RATIO_BASIS["seen"] == "fixed_default"
+    assert g1["output_label"]["holdout_B_B0"] == protocol.RATIO_BASIS["holdout"] == "selected"
+    amended = {s: h for s, h in g2["stage_ceilings_amended"].items() if s != "0"}
+    assert amended == protocol.STAGE_CEILINGS
+    assert sum(g2["stage_ceilings_amended"].values()) == pytest.approx(sum(g2["stage_ceilings_registered"].values()))
+    assert sum(g2["stage_ceilings_amended"].values()) == pytest.approx(g2["total_cpu_hours"]["amended"], abs=1e-5)
     groups = record["analysis"]["fold_groups"]
     assert tuple(groups["two_family"]["outer"]) == protocol.FOLD_GROUPS["two_family"]
     assert tuple(groups["single_family"]["outer"]) == protocol.FOLD_GROUPS["single_family"]
+
+
+def test_cpu_outside_fits_is_recorded_once_and_the_process_remainder_completes_the_ledger(tmp_path, monkeypatch):
+    clock = iter([100.0, 101.0, 110.0, 112.0, 115.0, 120.0, 130.0])  # A fake process CPU clock, in seconds.
+    monkeypatch.setattr("aegis.config_b.compute.cpu_seconds", lambda: next(clock))
+    ledger = Ledger(tmp_path / "l.csv")
+    with ledger.fit("1", "a fit"):                                    # 100 -> 101: 1 s
+        pass
+    with ledger.outside_fits("1", "stage work outside fits"):         # 110 -> 120: 10 s, of which the fit is 3 s
+        with ledger.fit("1", "nested fit"):                           # 112 -> 115: 3 s
+            pass
+    ledger.record_process_remainder("1")                              # 130 in all
+    cpu = {r["label"]: r["cpu_seconds"] for r in ledger.rows}
+    assert cpu["a fit"] == 1 and cpu["nested fit"] == 3 and cpu["stage work outside fits"] == 7
+    assert sum(cpu.values()) == 130  # The ledger holds the process's whole CPU, nothing counted twice.
 
 
 def test_a_failed_fit_still_records_its_cpu(tmp_path):

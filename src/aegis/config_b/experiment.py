@@ -58,7 +58,8 @@ STAGE_WORK = {
     "4a": "shortcut audit of B", "4b": "shortcut audit of B0", "4c": "shortcut audit of A",
     "5": "determinism rerun of every outer fold",
 }
-SEEN_FOLD_CANDIDATE = protocol.CANDIDATES[0]  # Proposed amendment 1 (G1): the seen fold uses the default 0.25.
+SEEN_FOLD_CANDIDATE = f"{protocol.SEEN_FOLD_RATIO:g}"  # Amendment 1 (G1): a fixed default, not a selected ratio.
+assert SEEN_FOLD_CANDIDATE == protocol.CANDIDATES[0]
 
 
 @dataclass
@@ -182,6 +183,7 @@ class Runner:
                 rows.append({
                     "dataset": ds.name, "arm": arm, "seed": seed, "fold": name, "treatment": treatment.name,
                     "family": family, "target_fpr": target_fpr, "ratio": ratio,
+                    "ratio_basis": protocol.RATIO_BASIS["A" if arm == "A" else name],
                     "fold_group": "seen" if fold.held_out is None else protocol.fold_group(family),
                     "train_rows": int(len(train)), "replay_total": replay.total, "fit_rows": model.n_fit_rows,
                     "attack_ess": info["attack_class"]["ess"], "n_attack": int(y.sum()), "n_benign": int((y == 0).sum()),
@@ -298,6 +300,10 @@ class Runner:
         if any(s not in finished for s in protocol.STAGES[:order]):
             raise StopRun(f"stage {stage} needs every earlier stage finished first: {protocol.STAGES[:order]}")
         projection = self.ledger.before_stage(stage, finished)
+        with self.ledger.outside_fits(stage, "stage work outside fits"):
+            return self._run_stage(stage, projection)
+
+    def _run_stage(self, stage: str, projection: dict) -> dict:
         self.stage, self.gate_pending = stage, True
         seeds = list(self.config.seeds)
         self.log(f"stage {stage}: {STAGE_WORK[stage]}; projection {projection['projected_total']:.1f} CPU-h")
@@ -341,6 +347,10 @@ class Runner:
         missing = [s for s in protocol.STAGES if not (self.out / f"stage_{s}.done").exists()]
         if missing:
             raise StopRun(f"stages {missing} have not finished; results are not final before stage 5 (section 10)")
+        with self.ledger.outside_fits("report", "report tables"):
+            return self._report()
+
+    def _report(self) -> dict:
         results = self.folds.load_all()
         samples, primary = self.config.bootstrap_samples, self.config.target_fprs[0]
         results.to_csv(self.out / "results.csv", index=False)
@@ -388,6 +398,8 @@ def main() -> None:
     except (StopRun, InvariantViolation) as stop:
         print(f"STOPPED: {stop}")
         raise SystemExit(1)
+    finally:  # The ledger then holds this process's whole CPU.
+        ledger.record_process_remainder(args.stage or "report")
 
 
 if __name__ == "__main__":

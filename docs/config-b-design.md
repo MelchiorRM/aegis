@@ -1,6 +1,12 @@
 # Config B design (Phase 2) — final revised protocol, for review before pre-registration
 
-**Status:** revision 7 of 2026-11-10, for final review.
+**Status:** revision 8 of 2026-11-10, for final review.
+- **What revision 8 adds:**
+  - the owner's approval of both resolutions in Config B amendment 1 (G1: the seen fold uses the fixed default
+    ratio 0.25, labelled `fixed_default`; G2: stage 1 fits arm A only, and B's and B0's seed-0 outer folds move to
+    stage 3), with the stage ceilings recalculated (3.5);
+  - the record that implementation and synthetic-data testing came before final authorization (issue 31);
+  - the implementation status, with synthetic-data tests kept apart from real-data validation (7).
 - **What revision 7 adds:** the owner's decisions on the amendment's open questions:
   - the perturbation arm is excluded (2.3);
   - there is no minimum effect size;
@@ -17,8 +23,9 @@
 - **Earlier approvals:** the compute plan, the data-budget rule, the B/B0 design (subject to the invariant in 3.2.1),
   the evidence procedures and the final two-family mapping. They cover design only, not execution. The feasibility
   spike was accepted earlier (`docs/spikes/cage4-feasibility.md`).
-- **Not authorized:** Config B implementation and experiments. No Config B code, training data or model comparison
-  exists.
+- **Implemented, not run:** the Config B code and its tests exist (`src/aegis/config_b/`, `tests/test_config_b.py`)
+  and pass on synthetic data. No real-data fit, training data or model comparison exists. Stages 1–5 are not
+  authorized, and the execution guard refuses them.
 - **Unchanged:** Config A stays frozen. Configs C, D and E have not started. CSE-CIC-IDS2018 stays closed: Phase 5
   is a separate, mandatory opening authorization, and nothing here touches it.
 
@@ -379,10 +386,10 @@ inputs, or a silent fallback (owner, 2026-11-09).
    and its transformed distinct rows for that stage's first fold must equal, bit for bit, what Config A's own
    `RandomForestBaseline.fit` path produces on the same rows. A mismatch stops the run.
 
-The discrepancy was found at design level, against the current code. No implementation exists, so nothing has
-been verified at run time yet.
+The discrepancy was found at design level, against the current code. All six invariants are now implemented
+(`src/aegis/config_b/model.py`) and tested on synthetic data. None has run on real data yet.
 
-#### 3.2.2 Mandatory tests (to be written with the implementation; none exists yet)
+#### 3.2.2 Mandatory tests (implemented in `tests/test_config_b.py`; synthetic data only)
 - **Where they run:** in the Aegis test suite, on synthetic data like the existing tests. Every one must pass
   before any Config B stage runs.
 - **Config A is not touched:** the tests import Config A's code, never patch or modify it, and
@@ -546,10 +553,10 @@ for their largest training set.
 | Stage | Work | Scope A: improved CICIDS2017 only (**selected**) | Scope B: both datasets (not selected) |
 |---|---|---|---|
 | 0 | Scenario bank, 250 episodes (measured, already spent) | 3.2 | 3.2 |
-| 1 | Calibration: seed 0 outer folds, A, B and B0. CPU measured | 1.6 | 2.6 |
+| 1 | Calibration: seed 0 outer folds, **arm A only** (amendment 1, G2; registered: A, B and B0, 1.6). CPU measured | 0.5 | 2.6 |
 | 2a | Nested selection of B (3 ratios) | 9.3 | 25.3 |
 | 2b | Nested selection of B0 (3 ratios, same rule) | 9.3 | 25.3 |
-| 3 | Outer folds: A, B and B0, seeds 1–4 | 6.3 | 10.4 |
+| 3 | Outer folds: A seeds 1–4; **B and B0 seeds 0–4** (amendment 1, G2; registered: seeds 1–4, 6.3) | 7.3 | 10.4 |
 | 4a | Shortcut audit of B | 10.6 | 23.5 |
 | 4b | Shortcut audit of B0 | 10.6 | 23.5 |
 | 4c | Shortcut audit of A under `25685b84dd83f65c` | 10.1 | 21.2 |
@@ -557,6 +564,11 @@ for their largest training set.
 | ~~6~~ | ~~Perturbation arm~~: excluded (2.3), does not run | 0 (was 2.6) | 4.5 |
 | | **Total (ceiling)** | **68.8** projected; **71.5** approved planning budget | **152.7** (margin 27.3, 15%) |
 | | Wall time, 8 cores | about 9 h | about 19 h |
+
+**Amendment 1 (G2):** stage 1 cannot fit B and B0 before stage 2 selects their ratios, so stage 1 fits arm A only
+and B's and B0's seed-0 outer folds move to stage 3. Stage 1 falls from 1.562851 to 0.506667 CPU-h and stage 3 rises
+from 6.251404 to 7.307588. The total, 68.813517 CPU-h, is unchanged (Scope B's column is not recalculated: it was
+not selected).
 
 **What Scope A leaves out, and why:**
 - every UNSW-NB15 fit: A, B and B0 outer folds, selection, audits, determinism rerun, and perturbation.
@@ -636,8 +648,9 @@ needed, the candidates would be 0.25 and 1.0, with the same rule and default.
 - **No opponent model, attacker predictor or learned attacker** is built for Config B.
 
 ## 5. Reproducibility and pre-registration
-**Drafted for review (2026-11-10):** `docs/preregistration/config_b.md` and `config_b.json` (revision 2) cover
-every item below. The perturbation item no longer applies, because the arm is excluded. It is not signed.
+**Registered by the owner 2026-11-10T07:51:06Z (commit `164651d`):** `docs/preregistration/config_b.md` and
+`config_b.json` (revision 2) cover every item below, with amendment 1 (approved, signature pending). The
+perturbation item no longer applies, because the arm is excluded.
 
 Recorded and frozen before any Config B experiment, through the pre-registration amendment process: a Config B
 identity (an extension of `aegis.frozen`) and a dated, signed (attested) development protocol. Its identity is added to the CSE-CIC-IDS2018 pre-registration by signed
@@ -788,10 +801,25 @@ execution.
 2. ~~Authorization to implement Config B~~: **done** (owner, 2026-11-10). Implemented in `src/aegis/config_b/`.
    T1–T10 and the runner's safeguards are in `tests/test_config_b.py`, and the full suite passes. No real-data fit
    has run.
-3. **Sign Config B amendment 1** (G1: the seen-fold ratio; G2: stage 1 fits A only), drafted in
-   `docs/preregistration/config_b.md`.
+3. **Config B amendment 1:** both resolutions **approved by the owner (2026-11-10)**: G1, the seen fold uses the
+   fixed default ratio 0.25, labelled as a fixed default and kept in the secondary degradation comparison; G2,
+   stage 1 fits arm A only and B's and B0's seed-0 outer folds move to stage 3. **Signature pending** in
+   `config_b.json`.
 4. **Sign the identity addendum** (Config B identity in `config_b.json`).
 5. **Authorize stages,** recorded in `stage_authorizations`. The runner refuses any stage not listed there.
 
-Nothing is frozen, and nothing runs. No Config B implementation, training data or model run starts before these decisions, the pre-registration
-amendment and the freeze.
+**Recorded, revision 8 (owner, 2026-11-10):** both resolutions of amendment 1 approved (above).
+
+**Order of events, stated plainly (issue 31):** the Config B code and its synthetic-data tests were written after
+the owner chose "Authorize implementation" (scope: the code, tests T1–T10 on synthetic data, and a draft identity
+addendum). They were written **before final authorization**: G1 and G2 were resolved in code before the owner had
+decided them, and amendment 1, the identity addendum and every stage authorization were unsigned. No real-data fit,
+training-data generation or experiment took place, and the execution guard refused stage 1.
+
+**What exists, and on what data:**
+- **Synthetic-data tests:** `tests/test_config_b.py` and the full suite pass (counts in the identity addendum).
+  They show the code implements the protocol. They are not evidence about CICIDS2017.
+- **Real-data validation:** none. It happens only inside authorized stages: invariants 1–6 before every fit, the
+  preprocessing gate on real rows, the stage-5 determinism rerun, and the ledger.
+
+Nothing runs until amendment 1 and the identity addendum are signed and stages are authorized.

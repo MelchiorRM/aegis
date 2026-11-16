@@ -246,44 +246,118 @@
     {
       "number": 1,
       "date": "2026-11-10",
-      "status": "draft; not signed",
+      "status": "signed 2026-11-10T11:39:06Z (owner decision recorded 2026-11-10, both resolutions approved)",
       "amends": "section 8 (seen-fold ratio) and section 12 (stage order and stage ceilings)",
       "reason": "two gaps found while implementing the stage runner, before any Config B fit on real data",
+      "order_of_events": "the runner, with G1 and G2 resolved as proposed, was implemented and tested on synthetic data before this amendment was decided or signed, and before the identity addendum and any stage authorization; no real-data fit, training-data generation or experiment took place; the execution guard refused stage 1 (issue_history.md, issue 31)",
       "G1_seen_fold_ratio": {
-        "proposed": "B and B0 use the default 0.25 in the seen fold",
-        "limitation": "degradation compares a held-out fit at the selected ratio with a seen fit at 0.25; primary contrast unaffected",
-        "alternative_not_proposed": "a seen fit per selected ratio, about +2 CPU-h"
+        "resolution": "B and B0 use the fixed default ratio 0.25 in the seen fold",
+        "fixed_default_not_selected": true,
+        "ratio": 0.25,
+        "output_label": {
+          "field": "ratio_basis",
+          "seen_fold_B_B0": "fixed_default",
+          "holdout_B_B0": "selected",
+          "arm_A": "none"
+        },
+        "role": "kept in the secondary degradation comparison (9.2); the primary contrast does not use the seen fold",
+        "limitation": "degradation compares a held-out fit at its selected ratio with a seen fit at the fixed default 0.25",
+        "alternative_not_adopted": "a seen fit per selected ratio, about +2 CPU-h"
       },
       "G2_stage_order": {
-        "proposed": "stage 1 fits arm A only for seed 0; B and B0 seed-0 outer folds move to stage 3",
-        "stage_ceilings": {
-          "1": 0.506667,
-          "3": 7.307588
+        "resolution": "stage 1 fits arm A only for seed 0; B and B0 seed-0 outer folds move to stage 3, after stage 2 selects their ratios",
+        "stage_3_work": "A seeds 1-4; B and B0 seeds 0-4",
+        "per_seed_outer_cpu_hours": {
+          "A": 0.506667,
+          "B": 0.528092,
+          "B0": 0.528092
         },
-        "total_unchanged_cpu_hours": 68.8
+        "stage_ceilings_registered": {
+          "0": 3.238056,
+          "1": 1.562851,
+          "2a": 9.344967,
+          "2b": 9.344967,
+          "3": 6.251404,
+          "4a": 10.561842,
+          "4b": 10.561842,
+          "4c": 10.133333,
+          "5": 7.814255
+        },
+        "stage_ceilings_amended": {
+          "0": 3.238056,
+          "1": 0.506667,
+          "2a": 9.344967,
+          "2b": 9.344967,
+          "3": 7.307588,
+          "4a": 10.561842,
+          "4b": 10.561842,
+          "4c": 10.133333,
+          "5": 7.814255
+        },
+        "total_cpu_hours": {
+          "registered": 68.813517,
+          "amended": 68.813517
+        },
+        "unchanged": [
+          "approved planning budget 71.5",
+          "stop rules 153, 175, 180"
+        ],
+        "recalculated_with": "spikes/cage4/estimate.py functions, scope cicids"
       },
       "recorded_no_change": [
         "bank: 1,250 UNKNOWN outcomes, all on Sleep; O6 applied explicitly; counts equal the manifest; no non-Sleep O1",
-        "ledger measures each fit with its scoring, each inner fold, and dataset loading; failed fits recorded"
+        "ledger holds the whole process CPU: each fit with its scoring, each inner fold, dataset loading, failed fits, each stage's CPU outside fits, the report step, and the process remainder (start, guard, bank check)"
       ],
-      "amended_by": null,
-      "amended_utc": null
+      "verification": {
+        "data": "synthetic only; not real-data validation",
+        "real_data": "enforced at run time inside authorized stages: invariants 1-6, stage-5 determinism rerun, ledger",
+        "synthetic_results": {
+          "partition_isolation": "252 replay sets (outer, audit and inner contexts, both arms, all three ratios): all inside their training rows; none in validation, test, cap-excluded, held-out family or benign",
+          "exact_matching": "32 B0 outer/audit rows equal B's realized total at the same ratio; 144 inner rows equal; 58 same-ratio B/B0 rows identical",
+          "determinism": "stage-5 rerun 96 rows, 0 differences; second independent full run 192 rows identical, selections and contrasts identical",
+          "cpu_accounting": "before the fix 90.6% and 90.1% of process CPU in the ledger (issue 32); after: 100.0% in both runs (0.01 s outside, the loop between stages)"
+        }
+      },
+      "approved_by_owner_utc_date": "2026-11-10",
+      "amended_by": "MelchiorRM",
+      "amended_utc": "2026-11-10T11:39:06Z"
     }
   ],
   "identity_addendum": {
-    "status": "draft; not signed",
-    "config_b_identity": "3730788cdb4312d3",
+    "status": "signed",
+    "config_b_identity": "7b900fea59b6cf35",
+    "supersedes_draft": "3730788cdb4312d3 (before amendment 1's G1 labelling and the complete CPU ledger; never signed)",
     "command": "python -m aegis.config_b.identity",
-    "covers": [
-      "Config A 25685b84dd83f65c",
-      "src/aegis/config_b/*.py (9 files)",
-      "experiments/artifacts.py, experiments/baseline.py, experiments/selection.py",
-      "bank manifest sha256, mapping, protocol constants (with amendment 1 as proposed)"
-    ],
-    "tests": "tests/test_config_b.py 45 passed; full suite 217 passed",
+    "rule": "first 16 hex of sha256 over the sorted-key JSON of the components below",
+    "components": {
+      "config_a": "25685b84dd83f65c",
+      "config_b_sha256": {
+        "config_b/__init__.py": "965589f5025681e6dc00f0e57ad6f6452524beb8b16ab69d63f077819e6d9684",
+        "config_b/analysis.py": "1db6ff528dcdc61d0e55665cdfa73a2b9c277933e3f3c3164af012e8bb462165",
+        "config_b/bank.py": "7d56d0515cc69d292de0352a096b76ff223ca8024cef5d0e8f2f7de081f18a8b",
+        "config_b/compute.py": "3f462d11c1de8578cde0d6ab622b13e9ac1038b20d70bdb7331ef53863e6a872",
+        "config_b/experiment.py": "aefef60d289acf26123efcd5d895acbbb8d9c00fb0d7d52bbe020876d4099303",
+        "config_b/identity.py": "b4cb0f05399ce43e3650e63406e199a06cdb996eada2b53fe553fdf65bf4f921",
+        "config_b/model.py": "c2f9c49ac8fb8a38e89b29aaab1522243b7fb181b80ef36dbab9704c40b0cad8",
+        "config_b/protocol.py": "d265701ac6b2e0c6110fa937ea73b9b26ffe9e4162f3b81aa36b641cb9f32826",
+        "config_b/replay.py": "400c61eb9c5e25cdc342aef2faae0d541e154e4e0d5106bb384aa09a0bbf7920"
+      },
+      "reused_sha256": {
+        "experiments/artifacts.py": "ca61aac645c2b3037c60d630aab4e04c6a4edad97847ac623eed7efde6a078de",
+        "experiments/baseline.py": "b627cd48886afc697a0e8a09195d659b3dea50d2cf1c5e4dd2a0f31dfbc0bb38",
+        "experiments/selection.py": "ef97a8ff93967e8f3ca33de81e76e4d59e834188700adf566d79d5218a774052"
+      },
+      "protocol_constants_sha256": "a12c0d427ce0eb70d7ab31163ff51bb1cae41c9ccebb41d194d6f018a8d8278e",
+      "protocol_constants_include": "bank manifest sha256, mapping, SEEN_FOLD_RATIO 0.25 and RATIO_BASIS (G1), amended STAGE_CEILINGS (G2), budgets and stop rules"
+    },
+    "tests": {
+      "data": "synthetic only; not real-data validation",
+      "config_b": "tests/test_config_b.py 46 passed",
+      "full_suite": "218 passed (earlier result before amendment 1's changes: 217 passed; one ledger test added)"
+    },
     "records_hashes_only": true,
-    "signed_by": null,
-    "signed_utc": null
+    "signed_by": "MelchiorRM",
+    "signed_utc": "2026-11-10T11:39:06Z"
   },
   "stage_authorizations": [],
   "compute_approvals": []

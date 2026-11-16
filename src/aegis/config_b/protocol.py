@@ -40,6 +40,10 @@ MAX_REPLAYS_PER_ROW = 4  # A guard; it does not bind under this mapping.
 # Section 8: ratio selection. The first candidate is the default.
 RATIOS = (0.25, 0.5, 1.0)
 CANDIDATES = tuple(f"{r:g}" for r in RATIOS)  # ("0.25", "0.5", "1")
+# Config B amendment 1 (G1): the seen fold has no held-out family, so the selection rule gives it no ratio. B and B0
+# use this fixed default there. It is labelled "fixed_default" in every output row, never reported as a selected ratio.
+SEEN_FOLD_RATIO = 0.25
+RATIO_BASIS = {"A": "none", "seen": "fixed_default", "holdout": "selected"}
 
 # Section 9.3: the shortcut audit.
 RULE_TREATMENTS = ("remove_matching_signatures", "no_tcp_window", "neutralize_missing_markers", "all_controls")
@@ -52,7 +56,7 @@ FOLD_GROUPS = {"two_family": ("bot", "dos"), "single_family": ("brute_force", "p
 # Section 12: compute. Stage ceilings are spikes/cage4/estimate.py --scope cicids (CPU-h, wall x 8 cores).
 STAGE0_SPENT_CPU_HOURS = 11_657.0 / 3600  # Measured bank cost, already spent.
 STAGES = ("1", "2a", "2b", "3", "4a", "4b", "4c", "5")  # Stage 6 (perturbation) is excluded (section 11).
-# Proposed Config B amendment 1 (G2): stage 1 fits arm A only (5 fits at 0.76 wall-min x 8 cores = 0.506667), so
+# Config B amendment 1 (G2): stage 1 fits arm A only (5 fits at 0.76 wall-min x 8 cores = 0.506667), so
 # B's and B0's seed-0 outer folds move to stage 3 (6.251404 + 1.562851 - 0.506667). The total is unchanged, 68.8.
 STAGE_CEILINGS = {
     "1": 0.506667, "2a": 9.344967, "2b": 9.344967, "3": 7.307588,

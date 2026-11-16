@@ -39,6 +39,9 @@ LIMITATIONS = [
     "A positive or negative classification means only that the interval excludes zero; it is not a claim of "
     "practical importance.",
     "With min_samples_leaf=2, a record and its copy can form a leaf on their own.",
+    "Amendment 1 (G1): B's and B0's seen-fold fits use the fixed default ratio 0.25, not a selected ratio. The "
+    "degradation comparison sets a held-out fit at its selected ratio against a seen fit at 0.25; the primary "
+    "contrast (B − B0 on held-out folds) does not use the seen fold.",
 ]
 
 
@@ -90,8 +93,9 @@ def contrasts(results: pd.DataFrame, samples: int, primary_fpr: float) -> pd.Dat
 def degradation(results: pd.DataFrame, samples: int) -> pd.DataFrame:
     """Seen minus held-out raw recall per arm and seed, and its difference per contrast (section 9.2)."""
     ref = results[results["treatment"] == protocol.REFERENCE]
-    seen = ref[ref["fold"] == "seen"][["arm", "seed", "family", "target_fpr", "raw_recall"]]
-    held = ref[ref["fold"] == "holdout"][["arm", "seed", "family", "target_fpr", "raw_recall"]]
+    columns = ["arm", "seed", "family", "target_fpr", "raw_recall", "ratio", "ratio_basis"]
+    seen = ref[ref["fold"] == "seen"][columns]
+    held = ref[ref["fold"] == "holdout"][columns]
     deg = seen.merge(held, on=["arm", "seed", "family", "target_fpr"], suffixes=("_seen", "_held"))
     deg["degradation"] = deg["raw_recall_seen"] - deg["raw_recall_held"]
     out = []
@@ -102,7 +106,11 @@ def degradation(results: pd.DataFrame, samples: int) -> pd.DataFrame:
                 continue
             stats = _paired(a, b, "degradation", samples)
             out.append({"family": family, "fold_group": protocol.fold_group(family), "target_fpr": fpr,
-                        "contrast": f"{left} - {right}", **stats,
+                        "contrast": f"{left} - {right}",
+                        **{f"{side}_{arm}": ",".join(sorted({f"{r:g}:{basis}" for r, basis in zip(
+                            frame[f"ratio_{side}"], frame[f"ratio_basis_{side}"])}))
+                           for arm, frame in ((left, a), (right, b)) for side in ("seen", "held")},
+                        **stats,
                         "classification": classify(stats["ci_low"], stats["ci_high"])})
     return pd.DataFrame(out)
 

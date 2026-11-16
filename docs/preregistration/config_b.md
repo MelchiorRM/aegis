@@ -460,53 +460,123 @@ Each amendment is dated, given a reason, signed in `config_b.json`, and made bef
 above stays as registered (`registered_utc` 2026-11-10T07:51:06Z). Where an amendment changes a requirement, the
 amendment governs. **The runner refuses every stage while any amendment is unsigned.**
 
-### Amendment 1, 2026-11-10 (DRAFT, NOT SIGNED): two gaps found during implementation
+### Amendment 1, 2026-11-10: two gaps found during implementation (SIGNED 2026-11-10T11:39:06Z)
 **Reason.** Writing the stage runner exposed two places where the registered protocol cannot be executed as written.
 Both were found by reading the protocol against the code, before any Config B fit on real data. No result exists.
+
+**Owner decision (2026-11-10):** both proposed resolutions are approved, as stated below. The amendment took effect
+when it was signed in `config_b.json` (`amendments[0].amended_by`, `amended_utc`): 2026-11-10T11:39:06Z.
+
+**How it was found, and in what order (recorded, `docs/issue_history.md`, issue 31).** The runner, with G1 and G2
+resolved as proposed, was implemented and tested on synthetic data before this amendment was decided or signed,
+and before the identity addendum and any stage authorization. No real-data fit, training-data generation or
+experiment took place. The execution guard refused stage 1.
 
 **G1. The seen fold's replay ratio.**
 - **Gap:** section 8 selects each arm's ratio per outer *held-out* family. The seen fold, with every family in
   training, has no held-out family, so the rule gives it no ratio. B's and B0's seen fits are needed for the
   secondary degradation contrast (9.2), and the compute plan charges them.
-- **Proposed:** B and B0 use the rule's fixed default, **0.25**, in the seen fold.
+- **Resolution:** B and B0 use the rule's **fixed default ratio, 0.25**, in the seen fold.
+  - **It is a fixed default, not a selected ratio.** Every output row carries `ratio_basis`:
+    - `fixed_default` for B's and B0's seen-fold fits;
+    - `selected` for their held-out fits, at the ratio stage 2 selected;
+    - `none` for arm A.
+    The degradation table states each side's ratio with its basis (for example `0.25:fixed_default` against
+    `1:selected`). No report may describe a seen-fold ratio as selected.
   - No data enters the choice, and the compute plan is unchanged.
-  - **Limitation, reported with the degradation table:** a held-out fit at a selected ratio r ≠ 0.25 is then
-    compared with a seen fit at 0.25.
-  - The primary contrast (B − B0 on held-out folds) is unaffected.
-- **Alternative (not proposed):** fit a seen model at every ratio selected for any family in that seed, and pair
-  each family with the matching one. That adds up to about 2 CPU-h, inside 71.5 but close to it.
+  - **It stays in the secondary degradation comparison (9.2),** with this limitation reported beside it: a held-out
+    fit at a selected ratio r ≠ 0.25 is compared with a seen fit at 0.25.
+  - The primary contrast (B − B0 on held-out folds) does not use the seen fold, and is unaffected.
+- **Alternative (not adopted):** fit a seen model at every ratio selected for any family in that seed, about
+  2 CPU-h more.
 
 **G2. The order of stages 1 and 2.**
 - **Gap:** stage 1 fits seed 0's outer folds for A, B and B0 "kept as part of stage 3". B's and B0's outer fits
   need their selected ratios, which only exist after stages 2a and 2b.
-- **Proposed:** stage 1 fits **arm A only** for seed 0 (the seen fold plus four held-out folds). B's and B0's seed-0
-  outer folds move to stage 3, which becomes "A seeds 1–4; B and B0 seeds 0–4".
+- **Resolution:** stage 1 fits **arm A only** for seed 0 (the seen fold plus four held-out folds). B's and B0's
+  seed-0 outer folds move to stage 3, after stage 2 has selected their ratios. Stage 3 becomes "A seeds 1–4; B and
+  B0 seeds 0–4".
   - The calibration ratio comes from A's fits. Replay arms are at most about 4% larger, and the ratio is
     re-measured before every later stage.
-  - **Compute:** stage 1's ceiling becomes 0.51 CPU-h and stage 3's becomes 7.31. The total is unchanged (68.8),
-    and so are the budget (71.5) and every stop rule.
+- **Stage ceilings, recalculated** with `spikes/cage4/estimate.py`'s own functions (scope `cicids`). Per seed, an
+  arm's five outer fits cost 0.506667 CPU-h for A and 0.528092 for B or B0 (charged at the largest ratio, 1):
+
+  | Stage | Registered (CPU-h) | Amended (CPU-h) | Change |
+  |---|---|---|---|
+  | 0 | 3.238056 | 3.238056 | — |
+  | 1 | 1.562851 (A, B, B0, seed 0) | **0.506667** (A, seed 0) | − 2 × 0.528092 |
+  | 2a | 9.344967 | 9.344967 | — |
+  | 2b | 9.344967 | 9.344967 | — |
+  | 3 | 6.251404 (A, B, B0, seeds 1–4) | **7.307588** (A seeds 1–4; B, B0 seeds 0–4) | + 2 × 0.528092 |
+  | 4a | 10.561842 | 10.561842 | — |
+  | 4b | 10.561842 | 10.561842 | — |
+  | 4c | 10.133333 | 10.133333 | — |
+  | 5 | 7.814255 | 7.814255 | — |
+  | **Total** | **68.813517** | **68.813517** | 0 |
+
+  - Stages 1 + 3 are 7.814255 before and after. The total stays **68.8 CPU-h**. The approved planning budget
+    (71.5) and every stop rule (153, 175, 180) are unchanged.
+  - The amended ceilings are `STAGE_CEILINGS` in `src/aegis/config_b/protocol.py`, which the ledger re-projects
+    from; a check recomputes them from the estimate script and finds no difference.
+  - **Effect on the stop rules:** the first re-projection (before stage 2a) now uses A's measured-to-ceiling
+    ratio only.
 
 **Also recorded, with no change to the protocol:**
 - **O6 in the bank.** The bank has 1,250 red steps with outcome UNKNOWN (5 per episode), all of them `Sleep`.
   `Sleep` is never counted, so they change no count. The code applies O6 explicitly, and recomputes counts equal
   to the manifest. Under the outcome rules, the bank also has no non-`Sleep` in-progress action (O1).
-- **What the ledger measures.** CPU is measured over each fit *and its scoring*, over each inner selection fold
-  as a whole, and over loading and cleaning the dataset. A failed fit's CPU is recorded too. That is more than
-  "before and after every fit" (section 12), so measured CPU is not understated.
+- **What the ledger measures: all of the process's CPU.** It has one row for each fit with its scoring, each inner
+  selection fold, and loading and cleaning the dataset. A failed fit's CPU is recorded too. Each stage also records
+  its CPU outside fits, the report step is measured, and on exit the command line records the rest of the process
+  (interpreter start, the guard, the bank check). That is more than "before and after every fit" (section 12), so
+  measured CPU is not understated (issues 29 and 32).
 
-**Status:** draft. It takes effect only when signed in `config_b.json` (`amendments[0].amended_by`,
-`amended_utc`). If G1 or G2 is decided differently, the code changes before the identity addendum is signed.
+**What has been verified, and on what data.** Everything below is **synthetic data only**. It shows the code does
+what the protocol says. It is **not** real-data validation, and no claim about CICIDS2017 rests on it.
+- `tests/test_config_b.py` and the full suite pass (counts in the identity addendum).
+- A separate synthetic verification ran all stages twice and checked replay partition isolation, exact B/B0
+  replay-count matching, determinism and CPU-accounting coverage (issue 31 records the figures).
+- On real data the same properties are enforced at run time: invariants 1–6 before every fit, the stage-5
+  determinism rerun, and the ledger. Any failure stops the run.
 
-### Identity addendum (DRAFT, NOT SIGNED)
+**Status:** owner decision recorded 2026-11-10; **signed 2026-11-10T11:39:06Z.**
+
+### Identity addendum (SIGNED 2026-11-10T11:39:06Z)
 - **What it records:** hashes only. It changes no protocol content (section 13).
-- **Config B identity: `3730788cdb4312d3`** (`python -m aegis.config_b.identity`). It covers:
-  - Config A `25685b84dd83f65c` (digest of the frozen identity);
-  - the nine files of `src/aegis/config_b/`;
-  - the reused, unfrozen Config A experiment code: `experiments/artifacts.py`, `experiments/baseline.py` and
-    `experiments/selection.py`;
-  - the bank manifest hash, the mapping and every protocol constant, including G1 and G2 as proposed.
-- **Tests:** T1–T10 and the runner's safeguards (`tests/test_config_b.py`, 45 tests) pass on synthetic data, and
-  so does the full suite (217 tests).
-- **Order:** amendment 1 is signed first. If it changes anything, the identity is recomputed and this addendum
-  redrafted. Then the addendum is signed, and stage authorizations are recorded separately in
-  `stage_authorizations`.
+- **Config B identity: `7b900fea59b6cf35`** (`python -m aegis.config_b.identity`).
+  - It supersedes the unsigned draft `3730788cdb4312d3`. Two changes altered identity-covered files:
+    - amendment 1's G1 label (`SEEN_FOLD_RATIO`, `RATIO_BASIS`, the `ratio_basis` output column) changed
+      `protocol.py`, `experiment.py`, `analysis.py` and `identity.py`;
+    - the complete CPU ledger (issue 32) changed `compute.py` and `experiment.py`.
+  - **Rule:** the first 16 hex digits of sha256 over the sorted-key JSON of the components below.
+- **Components:**
+  - Config A identity: `25685b84dd83f65c` (unchanged; "Matches the frozen Config A").
+  - Source files, sha256 of the file text with LF line endings:
+
+  | File | sha256 |
+  |---|---|
+  | `src/aegis/config_b/__init__.py` | `965589f5025681e6dc00f0e57ad6f6452524beb8b16ab69d63f077819e6d9684` |
+  | `src/aegis/config_b/analysis.py` | `1db6ff528dcdc61d0e55665cdfa73a2b9c277933e3f3c3164af012e8bb462165` |
+  | `src/aegis/config_b/bank.py` | `7d56d0515cc69d292de0352a096b76ff223ca8024cef5d0e8f2f7de081f18a8b` |
+  | `src/aegis/config_b/compute.py` | `3f462d11c1de8578cde0d6ab622b13e9ac1038b20d70bdb7331ef53863e6a872` |
+  | `src/aegis/config_b/experiment.py` | `aefef60d289acf26123efcd5d895acbbb8d9c00fb0d7d52bbe020876d4099303` |
+  | `src/aegis/config_b/identity.py` | `b4cb0f05399ce43e3650e63406e199a06cdb996eada2b53fe553fdf65bf4f921` |
+  | `src/aegis/config_b/model.py` | `c2f9c49ac8fb8a38e89b29aaab1522243b7fb181b80ef36dbab9704c40b0cad8` |
+  | `src/aegis/config_b/protocol.py` | `d265701ac6b2e0c6110fa937ea73b9b26ffe9e4162f3b81aa36b641cb9f32826` |
+  | `src/aegis/config_b/replay.py` | `400c61eb9c5e25cdc342aef2faae0d541e154e4e0d5106bb384aa09a0bbf7920` |
+  | `src/aegis/experiments/artifacts.py` | `ca61aac645c2b3037c60d630aab4e04c6a4edad97847ac623eed7efde6a078de` |
+  | `src/aegis/experiments/baseline.py` | `b627cd48886afc697a0e8a09195d659b3dea50d2cf1c5e4dd2a0f31dfbc0bb38` |
+  | `src/aegis/experiments/selection.py` | `ef97a8ff93967e8f3ca33de81e76e4d59e834188700adf566d79d5218a774052` |
+
+  - The three `experiments/` files are reused Config A code outside Config A's frozen identity. They are unchanged
+    from commit `164651d`.
+  - Protocol constants, sha256 of their sorted-key JSON: `a12c0d427ce0eb70d7ab31163ff51bb1cae41c9ccebb41d194d6f018a8d8278e`. They include the
+    bank manifest hash (`11021c5d…c222e`), the mapping, `SEEN_FOLD_RATIO` 0.25 and `RATIO_BASIS` (G1), the amended
+    `STAGE_CEILINGS` (G2), the budget and every stop rule.
+- **Tests, synthetic data only:**
+  - `tests/test_config_b.py`: 46 passed;
+  - the full suite: 218 passed. The earlier result, before amendment 1's changes, was 217 passed; one ledger test
+    was added.
+  These show the code implements the protocol. They are not real-data validation.
+- **Order:** amendment 1 is signed first. The addendum is signed next, if it still names the current identity.
+  Stage authorizations are then recorded separately in `stage_authorizations`.
