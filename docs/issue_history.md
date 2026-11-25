@@ -313,6 +313,29 @@ document or record it rests on. Failed runs stay preserved and are never reinter
   addendum was redrafted, and that redraft (identity `7b900fea59b6cf35`) is the one the owner signed at
   2026-11-10T11:39:06Z.
 
+### 33. The stage summary is the pre-fit projection, not the stage's measured CPU (found in stage 1; deferred to the next version)
+- **What happened (2026-11-25, stage 1):** the JSON the runner prints at the end of a stage, and writes to
+  `stage_<s>.done`, showed stage 1 at 0.0296 CPU-h and `ratio_measured_to_ceiling` 1.0. The ledger
+  (`results/config_b/compute_ledger.csv`) recorded 0.3396 CPU-h for stage 1, a ratio of 0.670 to its 0.507 CPU-h
+  ceiling.
+- **Cause:** `run_stage` takes the projection in `Ledger.before_stage`, before the stage's fits run, and
+  `_run_stage` writes that same object to `stage_<s>.done` when the stage ends (`experiment.py:342`). The 0.0296
+  CPU-h is the dataset load, which the ledger had recorded before the projection was taken. The summary is the
+  projection the stage started under. It is not the stage's outcome.
+- **What is not affected:**
+  - the ledger holds every row;
+  - the stop rules and every later projection read the ledger, not `stage_<s>.done`;
+  - the runner uses the `.done` file only to tell whether a stage has finished.
+  So the budget enforcement is correct. Only the summary is misleading.
+- **Decision (owner, 2026-11-25):** no change during Config B. Changing `experiment.py` would change the
+  registered identity `7b900fea59b6cf35` partway through the experiment. Config B is completed exactly as
+  pre-registered.
+- **Handling until then:** after each stage, the stage's CPU is reported from the ledger and reconciled against
+  the summary.
+- **For the next experiment version:** write a post-stage summary from the ledger (measured CPU for the stage,
+  the ratio over finished stages, and the projection for the rest), and keep the pre-stage projection as a
+  separately named field.
+
 ## Recurring lessons
 1. **Exact reproduction first.** Rerun before reporting, and treat thread order, library versions and indices as
    suspects.
