@@ -801,12 +801,13 @@ execution.
 2. ~~Authorization to implement Config B~~: **done** (owner, 2026-11-10). Implemented in `src/aegis/config_b/`.
    T1–T10 and the runner's safeguards are in `tests/test_config_b.py`, and the full suite passes. No real-data fit
    has run.
-3. **Config B amendment 1:** both resolutions **approved by the owner (2026-11-10)**: G1, the seen fold uses the
-   fixed default ratio 0.25, labelled as a fixed default and kept in the secondary degradation comparison; G2,
-   stage 1 fits arm A only and B's and B0's seed-0 outer folds move to stage 3. **Signature pending** in
-   `config_b.json`.
-4. **Sign the identity addendum** (Config B identity in `config_b.json`).
-5. **Authorize stages,** recorded in `stage_authorizations`. The runner refuses any stage not listed there.
+3. ~~Config B amendment 1~~: **done**, both resolutions approved by the owner (2026-11-10) and **signed
+   2026-11-10T11:39:06Z** in `config_b.json` (commit `38b3e7c`): G1, the seen fold uses the fixed default ratio
+   0.25, labelled as a fixed default and kept in the secondary degradation comparison; G2, stage 1 fits arm A only
+   and B's and B0's seed-0 outer folds move to stage 3.
+4. ~~Sign the identity addendum~~: **done**, identity `7b900fea59b6cf35` signed 2026-11-10T11:39:06Z
+   (commit `38b3e7c`).
+5. **Authorize stages** (pending; `stage_authorizations` is empty), recorded in `stage_authorizations`. The runner refuses any stage not listed there.
 
 **Recorded, revision 8 (owner, 2026-11-10):** both resolutions of amendment 1 approved (above).
 
@@ -822,4 +823,5 @@ training-data generation or experiment took place, and the execution guard refus
 - **Real-data validation:** none. It happens only inside authorized stages: invariants 1–6 before every fit, the
   preprocessing gate on real rows, the stage-5 determinism rerun, and the ledger.
 
-Nothing runs until amendment 1 and the identity addendum are signed and stages are authorized.
+Amendment 1 and the identity addendum are now signed (2026-11-10T11:39:06Z). Nothing runs until stages are
+authorized in `stage_authorizations`.
