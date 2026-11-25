@@ -580,3 +580,14 @@ what the protocol says. It is **not** real-data validation, and no claim about C
   These show the code implements the protocol. They are not real-data validation.
 - **Order:** amendment 1 is signed first. The addendum is signed next, if it still names the current identity.
   Stage authorizations are then recorded separately in `stage_authorizations`.
+
+### Stage authorization 1 (owner, 2026-11-25T18:33:21Z)
+- **Stages:** 1, 2a, 2b, 3, 4a, 4b, 4c and 5, which is every stage in section 12. Stage 6, the perturbation arm,
+  is excluded (section 11) and does not run.
+- **Under:** amendment 1 and the identity addendum `7b900fea59b6cf35`, both signed 2026-11-10T11:39:06Z. When
+  this authorization was recorded, `python -m aegis.config_b.identity` printed the same identity.
+- **Order:** stages run in the order of section 12. The runner refuses a stage until every earlier stage has
+  finished.
+- **Compute:** stays within the approved planning budget of 71.5 CPU-h. Nothing is authorized past it or past
+  the 153 CPU-h planning ceiling: `compute_approvals` is unchanged, so every stop rule still applies.
+- **Recorded** in `config_b.json` as `stage_authorizations[0]`.

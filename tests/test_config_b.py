@@ -511,7 +511,7 @@ def test_neither_family_control_stops_on_a_difference():
 
 def amendment(tmp_path, **changes):
     record = json.loads(protocol.AMENDMENT.read_text(encoding="utf-8"))
-    record.update({"amendments": [], **changes})  # Each test sets the amendments it needs.
+    record.update({"amendments": [], "stage_authorizations": [], **changes})  # Each test sets what it needs.
     path = tmp_path / "config_b.json"
     path.write_text(json.dumps(record), encoding="utf-8")
     return path
@@ -544,12 +544,16 @@ def test_no_stage_runs_without_a_signed_identity_addendum_and_stage_authorizatio
         identity.authorization("1", unsigned)
 
 
-def test_the_registered_amendment_has_no_stage_authorized():
-    with pytest.raises(PermissionError, match="stage 1 is not authorized"):  # Signed, but no stage authorized yet.
-        identity.authorization("1")
+def test_the_registered_amendment_authorizes_every_stage_once():
     record = json.loads(protocol.AMENDMENT.read_text(encoding="utf-8"))
     assert record["identity_addendum"]["config_b_identity"] == identity.digest()  # The signature names the current code.
-    assert record["identity_addendum"]["signed_by"] == "MelchiorRM" and record["stage_authorizations"] == []
+    assert record["identity_addendum"]["signed_by"] == "MelchiorRM"
+    (granted,) = record["stage_authorizations"]  # Authorization 1, owner, 2026-11-25.
+    assert granted["stages"] == list(protocol.STAGES) and granted["config_b_identity"] == identity.digest()
+    assert record["compute_approvals"] == []  # No approval past the 71.5 CPU-h planning budget.
+    for stage in (*protocol.STAGES, "report"):
+        approvals = identity.authorization(stage)
+        assert approvals == {"approved_budget": protocol.APPROVED_PLANNING_BUDGET, "past_planning_ceiling": False}
 
 
 def test_protocol_constants_agree_with_the_registered_amendment():

@@ -807,7 +807,8 @@ execution.
    and B's and B0's seed-0 outer folds move to stage 3.
 4. ~~Sign the identity addendum~~: **done**, identity `7b900fea59b6cf35` signed 2026-11-10T11:39:06Z
    (commit `38b3e7c`).
-5. **Authorize stages** (pending; `stage_authorizations` is empty), recorded in `stage_authorizations`. The runner refuses any stage not listed there.
+5. ~~Authorize stages~~: **done**, stages 1–5 (1, 2a, 2b, 3, 4a, 4b, 4c, 5) authorized by the owner
+   2026-11-25T18:33:21Z and recorded in `stage_authorizations`, within the 71.5 CPU-h approved budget.
 
 **Recorded, revision 8 (owner, 2026-11-10):** both resolutions of amendment 1 approved (above).
 
@@ -823,5 +824,5 @@ training-data generation or experiment took place, and the execution guard refus
 - **Real-data validation:** none. It happens only inside authorized stages: invariants 1–6 before every fit, the
   preprocessing gate on real rows, the stage-5 determinism rerun, and the ledger.
 
-Amendment 1 and the identity addendum are now signed (2026-11-10T11:39:06Z). Nothing runs until stages are
-authorized in `stage_authorizations`.
+Amendment 1 and the identity addendum were signed on 2026-11-10T11:39:06Z, and stages 1–5 were authorized on
+2026-11-25T18:33:21Z. Stage 1 (arm A only, seed 0) is the next run.

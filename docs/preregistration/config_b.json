@@ -359,6 +359,15 @@
     "signed_by": "MelchiorRM",
     "signed_utc": "2026-11-10T11:39:06Z"
   },
-  "stage_authorizations": [],
+  "stage_authorizations": [
+    {
+      "number": 1,
+      "stages": ["1", "2a", "2b", "3", "4a", "4b", "4c", "5"],
+      "config_b_identity": "7b900fea59b6cf35",
+      "scope": "every stage of section 12 (stage 6, the perturbation arm, is excluded and does not run); stages run in order under the signed amendment 1 and identity addendum; within the approved planning budget of 71.5 CPU-h, with no authorization past it or past the 153 CPU-h planning ceiling (compute_approvals unchanged)",
+      "authorized_by": "MelchiorRM",
+      "authorized_utc": "2026-11-25T18:33:21Z"
+    }
+  ],
   "compute_approvals": []
 }
