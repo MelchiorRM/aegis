@@ -45,3 +45,52 @@ in `SHA256SUMS`.
     docs/audits/config_b_pre_stage3_results_sha256.txt docs/audits/config_b_pre_stage3_ledger.csv
 .venv/bin/python -I docs/audits/config_b_prestage3_check.py   # Only meaningful against the pre-stage-3 state.
 ```
+
+## Stage 4a (owner authorization 2026-11-27)
+
+Stage 4a is the shortcut audit of arm B: 5 seeds x 4 held-out families x 5 treatments (the four of the decision
+rule and `missingness_only`), each at B's selected ratio. The checks cover execution integrity only: no score is
+read or compared.
+
+| File | What it is |
+|---|---|
+| `config_b_pre_stage4a_ledger.csv` | The compute ledger as it stood before stage 4a (147 rows) |
+| `config_b_post_stage3_fingerprints_reconstructed.json` | The fingerprint registry as it stood after stage 3, rebuilt (below) |
+| `config_b_poststage4a_check_initial_buggy.py` | The first version of the post-stage-4a check, with a comparison bug (below) |
+| `config_b_poststage4a_check_initial_failed.log` | Its failed output, saved when it ran |
+| `config_b_poststage4a_check.py` | The corrected post-stage-4a check |
+| `config_b_poststage4a_check.log` | Its output: all checks passed |
+| `config_b_post_stage4a_results_sha256.txt` | SHA-256 of all 480 result files after stage 4a, including the ledger. It is the baseline for checking that later stages preserve the earlier outputs |
+| `config_b_post_stage4a_full_test_suite.log` | Complete output of the full test suite after stage 4a (218 passed) |
+
+### The first post-stage-4a check failed because of a bug in the check, not in the run
+
+- **What failed:** the line `FAIL [1] stage_4a.done's figures for the bank and stages 1 to 3 equal the ledger`.
+  Every other line passed.
+- **Cause:** the check compared the bank (`"0"` in `stage_4a.done`, 3.2381 CPU-h) with `ledger.measured_hours("0")`.
+  The bank is not stored as ledger rows: it is the constant `protocol.STAGE0_SPENT_CPU_HOURS`, which
+  `Ledger.total_hours()` adds. So the ledger side was always 0.0. Stages 1, 2a, 2b and 3 matched exactly.
+- **Fix:** the bank is compared with the protocol constant, and stages 1 to 3 with the ledger. That is the only
+  change between the two scripts (lines 53 to 55).
+- **The ledger and the run were never affected.** Only this check misread the bank.
+- Unlike stage 3, the failed log here is the original output, saved when the check first ran.
+
+### The rebuilt post-stage-3 fingerprint registry
+
+Stage 4a extends `preprocessing_fingerprints.json` with 100 entries, so its post-stage-3 hash no longer applies, and
+no copy of the old file was kept. To check that none of the 55 earlier entries changed, the 100 audit entries were
+removed from the current registry and the rest written back in the registry's own format
+(`json.dumps(..., indent=1, sort_keys=True)`). The result has SHA-256 `bf8cab4c1d70ddb9...`, exactly the hash
+recorded for the registry in `config_b_post_stage3_results_sha256.txt`. So the 55 earlier entries are byte-for-byte
+unchanged, and the rebuilt file is the post-stage-3 registry.
+
+### How to rerun the check
+
+```
+.venv/bin/python -I docs/audits/config_b_poststage4a_check.py \
+    docs/audits/config_b_post_stage3_results_sha256.txt docs/audits/config_b_pre_stage4a_ledger.csv \
+    docs/audits/config_b_post_stage3_fingerprints_reconstructed.json
+```
+
+It is meaningful only while the results are in their post-stage-4a state: once stage 4b runs, the ledger gains
+rows of another stage.

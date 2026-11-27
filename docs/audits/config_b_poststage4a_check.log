@@ -1,0 +1,26 @@
+PASS [1] ledger: the 147 rows before stage 4a are unchanged; 103 rows appended
+PASS [1] every appended row is stage 4a
+PASS [1] 100 fit rows, all arm B, by treatment {'remove_matching_signatures': 20, 'no_tcp_window': 20, 'neutralize_missing_markers': 20, 'all_controls': 20, 'missingness_only': 20}
+PASS [1] no fit was recorded twice
+     non-fit row: load and clean the dataset: 105.0 s CPU
+     non-fit row: stage work outside fits: 167.7 s CPU
+     non-fit row: process remainder (start, guard, bank check, exit): 30.8 s CPU
+[1] stage 4a: fits 5.0700 CPU-h by treatment {'remove_matching_signatures': 1.3135, 'no_tcp_window': 1.1996, 'neutralize_missing_markers': 1.2295, 'all_controls': 1.1933, 'missingness_only': 0.1341}; outside fits 0.0843; total 5.1543 of ceiling 10.561842
+PASS [1] finished stages ['1', '2a', '2b', '3', '4a']
+[1] spent 21.6474 CPU-h (bank included); remaining approved budget 49.853; ratio 0.4967; remaining estimates {'4b': 5.246, '4c': 5.033, '5': 3.881}; projected total 35.81
+PASS [1] below the in-stage stop and within the approved budget
+[1] stage_4a.done (pre-stage projection, issue 33): stage 4a 0.0292; ratio 0.5001; total 16.5223; projected 36.06
+PASS [1] stage_4a.done's bank equals the protocol constant and its stages 1 to 3 equal the ledger
+PASS [1] stage_4a.done's own-stage figure is the dataset load only (issue 33)
+[1] stage 4a finished_utc from 2026-11-27T14:10:10Z to 2026-11-27T15:54:04Z; out-of-order rows: 0
+PASS [2] all 100 audit fold CSVs and 100 accounting files present (5 seeds x 4 held-out families x 5 treatments); missing []
+PASS [2] every audit fold: arm B, seed, treatment, held-out fold, B's selected ratio for that seed and family, 2 rows of the held-out family, replay total = accounting, held-out family never replayed; problems []
+[2] info: 100 of 100 audit folds evaluate the same attack/benign row sets as the stage 3 B reference fold (row hashes)
+PASS [2] folds/ holds exactly the 75 reference + 100 audit files (175); unexpected []; determinism/ still empty
+PASS [2] preprocessing fingerprints registered for all 100 audit folds (155 keys in all)
+[3] of 279 files hashed after stage 3: changed ['./compute_ledger.csv', './preprocessing_fingerprints.json'], removed []
+PASS [3] no stage 3 or earlier output changed or removed, except the ledger (append-only, checked in [1]) and the fingerprint registry
+PASS [3] all 55 fingerprints registered before stage 4a are unchanged
+PASS [4] Config A identity 25685b84dd83f65c
+PASS [4] Config B identity 7b900fea59b6cf35 equals the signed addendum
+POST-STAGE-4A CHECKS: ALL PASSED
