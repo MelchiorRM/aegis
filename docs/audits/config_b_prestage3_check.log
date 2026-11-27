@@ -1,0 +1,53 @@
+primary target FPR = 0.01; candidates = ('0.25', '0.5', '1'); seen-fold ratio = 0.25
+PASS [1] B: 20 rows
+PASS [1] B: 20 distinct seed/family pairs
+PASS [1] B: seeds [0, 1, 2, 3, 4], families ['bot', 'brute_force', 'dos', 'portscan']
+PASS [1] B: every selection is a registered candidate ['0.25', '0.5', '1']
+PASS [1] B: 3 inner families in every cell
+PASS [1] B: no missing mean inner recall
+PASS [1] B: dataset cicids2017_improved only
+PASS [1] B: CSV equals a fresh recomputation from selection/ (20 of 20)
+[2] B: ratio each outer fold will use (seen fold = fixed default 0.25)
+PASS [2] B seed 0: consumed ratios match the CSV row for each held-out family
+PASS [2] B seed 1: consumed ratios match the CSV row for each held-out family
+PASS [2] B seed 2: consumed ratios match the CSV row for each held-out family
+PASS [2] B seed 3: consumed ratios match the CSV row for each held-out family
+PASS [2] B seed 4: consumed ratios match the CSV row for each held-out family
+      seen   bot brute_force   dos portscan
+seed                                       
+0     0.25  0.25         0.5  0.25      0.5
+1     0.25  0.25        0.25  0.25     0.25
+2     0.25     1           1  0.25     0.25
+3     0.25     1        0.25  0.25        1
+4     0.25  0.25         0.5     1     0.25
+PASS [1] B0: 20 rows
+PASS [1] B0: 20 distinct seed/family pairs
+PASS [1] B0: seeds [0, 1, 2, 3, 4], families ['bot', 'brute_force', 'dos', 'portscan']
+PASS [1] B0: every selection is a registered candidate ['0.25', '0.5', '1']
+PASS [1] B0: 3 inner families in every cell
+PASS [1] B0: no missing mean inner recall
+PASS [1] B0: dataset cicids2017_improved only
+PASS [1] B0: CSV equals a fresh recomputation from selection/ (20 of 20)
+[2] B0: ratio each outer fold will use (seen fold = fixed default 0.25)
+PASS [2] B0 seed 0: consumed ratios match the CSV row for each held-out family
+PASS [2] B0 seed 1: consumed ratios match the CSV row for each held-out family
+PASS [2] B0 seed 2: consumed ratios match the CSV row for each held-out family
+PASS [2] B0 seed 3: consumed ratios match the CSV row for each held-out family
+PASS [2] B0 seed 4: consumed ratios match the CSV row for each held-out family
+      seen   bot brute_force   dos portscan
+seed                                       
+0     0.25  0.25        0.25  0.25     0.25
+1     0.25  0.25        0.25  0.25     0.25
+2     0.25   0.5        0.25  0.25     0.25
+3     0.25     1        0.25     1     0.25
+4     0.25   0.5        0.25  0.25     0.25
+PASS [2] selection/: 60 files, arm and seed columns match file names, outer != inner in every row
+PASS [3] neither-family control recomputes identically: {'folds': ['(brute_force, portscan)', '(portscan, brute_force)'], 'rows': 120, 'identical': True}
+PASS [3] control covers arms ['B', 'B0'], all 120 rows with zero replay
+[3] artifact preserved: results/config_b/neither_family_control.json sha256 e0ef3d76887a9eed, modified 2026-11-27 09:03:39.759028435+00:00
+PASS [4] Config A identity 25685b84dd83f65c
+PASS [4] Config B identity 7b900fea59b6cf35 equals the signed addendum
+PASS [4] stage 3 is in the recorded authorization; approvals {'approved_budget': 71.5, 'past_planning_ceiling': False}
+[4] ledger: finished ['1', '2a', '2b']; spent 12.402 CPU-h; by stage {'1': 0.34, '2a': 3.446, '2b': 5.379}; ratio 0.4774; stage 3 estimate 3.488 (ceiling 7.307588); projected 34.54 of 71.5
+PASS [5] folds/ holds only arm A seed 0 (16 rows); no B or B0 outer results exist yet
+PRE-STAGE-3 CHECKS: ALL PASSED

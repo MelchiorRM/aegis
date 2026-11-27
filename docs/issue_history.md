@@ -336,6 +336,26 @@ document or record it rests on. Failed runs stay preserved and are never reinter
   the ratio over finished stages, and the projection for the rest), and keep the pre-stage projection as a
   separately named field.
 
+### 34. A backward wall-clock step at the end of stage 2b (WSL2; operational, no effect on results)
+- **What happened (found 2026-11-27, pre-stage-3 audit):** the last stage 2b fit (seed 4, dos + portscan) has a
+  ledger `finished_utc` of 09:03:41Z, and its inner-fold file a modification time of 09:03:41.04Z. The stage's
+  closing rows (09:03:39Z), `selections_B0.csv` (09:03:39.55Z), `neither_family_control.json` and
+  `stage_2b.done` (09:03:39.82Z) all carry earlier times, although the code writes them after that fit.
+- **Cause:** the system wall clock stepped back by about 1.5–2 s after the fit was saved. WSL2 corrects clock
+  drift that way when it resynchronizes with the host.
+- **Evidence that the order of events was correct:** `selections_B0.csv` gives 3 inner families for seed 4's
+  dos and portscan cells. That is only possible if the dos + portscan inner-fold file already existed when the
+  selections were computed. A fresh recomputation from `selection/` equals the file, 20 of 20
+  (`docs/audits/config_b_prestage3_check.log`).
+- **What is not affected:**
+  - durations use `time.perf_counter`, which is monotonic;
+  - CPU comes from `rusage`;
+  - selections, the control and the stop rules do not read wall-clock times.
+  Only `finished_utc` and file modification times can be out of order, and only near a clock correction.
+- **Decision (owner, 2026-11-27):** recorded as an operational finding. The signed experiment is not changed.
+- **For the next experiment version:** record a monotonic sequence number or `time.monotonic_ns()` beside
+  `finished_utc`, so the order of ledger rows never depends on the wall clock.
+
 ## Recurring lessons
 1. **Exact reproduction first.** Rerun before reporting, and treat thread order, library versions and indices as
    suspects.

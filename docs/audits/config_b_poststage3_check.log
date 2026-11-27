@@ -1,0 +1,22 @@
+PASS [1] ledger: the 74 rows before stage 3 are unchanged; 73 rows appended
+PASS [1] every appended row is stage 3
+PASS [1] 70 fit rows, by arm {'A': 20, 'B': 25, 'B0': 25}
+     non-fit row: load and clean the dataset: 105.7 s CPU
+     non-fit row: stage work outside fits: 137.6 s CPU
+     non-fit row: process remainder (start, guard, bank check, exit): 24.1 s CPU
+[1] stage 3: fits 4.0169 CPU-h by arm {'A': 1.1375, 'B': 1.5004, 'B0': 1.379}; outside fits 0.0743; total 4.0912 of ceiling 7.307588
+[1] spent 16.4931 CPU-h; remaining approved budget 55.007; ratio 0.5001; remaining estimates {'4a': 5.282, '4b': 5.282, '4c': 5.068, '5': 3.908}; projected total 36.03
+[1] stage_3.done (pre-stage projection, issue 33): stage 3 0.0294; ratio 0.4774; total 12.4313; projected 34.57
+PASS [1] stage_3.done's figures for stages 1, 2a and 2b equal the ledger
+PASS [1] stage_3.done's own-stage figure is the dataset load only (issue 33)
+[1] stage 3 finished_utc from 2026-11-27T11:43:55Z to 2026-11-27T13:02:34Z; out-of-order rows: 0
+PASS [2] all 75 fold CSVs and 75 accounting files present (3 arms x 5 seeds x 5 folds); missing []
+PASS [2] every fold: arm, seed, reference treatment, registered ratio (A 0; seen 0.25; held-out = selection), expected family rows, replay total = accounting, A without replay, held-out family never replayed; problems []
+PASS [2] no unexpected fold files []; determinism/ still empty
+PASS [2] preprocessing fingerprints registered for all 25 outer folds (shared by A, B and B0)
+[3] of 137 files hashed before stage 3: changed ['./preprocessing_fingerprints.json'], removed []
+PASS [3] no earlier file changed or removed, except the fingerprint registry, which stage 3 extends
+PASS [3] the 5 stage-1 fingerprints are unchanged in the registry
+PASS [4] Config A identity 25685b84dd83f65c
+PASS [4] Config B identity 7b900fea59b6cf35 equals the signed addendum
+POST-STAGE-3 CHECKS: ALL PASSED
