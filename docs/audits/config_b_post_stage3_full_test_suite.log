@@ -1,0 +1,22 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.2.0, pluggy-1.7.0
+rootdir: /home/melchior/aegis
+configfile: pyproject.toml
+testpaths: tests
+plugins: platformdirs-4.14.5
+collected 218 items
+
+tests/test_artifacts.py ................................................ [ 22%]
+..............                                                           [ 28%]
+tests/test_attempted.py ......                                           [ 31%]
+tests/test_baseline.py .......................                           [ 41%]
+tests/test_config_b.py ..............................................    [ 62%]
+tests/test_data.py ................                                      [ 70%]
+tests/test_improved.py ..........                                        [ 74%]
+tests/test_metrics.py .......                                            [ 77%]
+tests/test_notebook.py ...                                               [ 79%]
+tests/test_provenance.py ..                                              [ 80%]
+tests/test_safeguards.py ...........................................     [100%]
+
+======================= 218 passed in 615.17s (0:10:15) ========================
+exit 0
