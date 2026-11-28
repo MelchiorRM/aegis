@@ -94,3 +94,43 @@ unchanged, and the rebuilt file is the post-stage-3 registry.
 
 It is meaningful only while the results are in their post-stage-4a state: once stage 4b runs, the ledger gains
 rows of another stage.
+
+## Stage 4b (owner authorization 2026-11-29)
+
+Stage 4b is the shortcut audit of arm B0: 5 seeds x 4 held-out families x 5 treatments, each at B0's selected ratio.
+The checks cover execution integrity only: no score is read or compared.
+
+| File | What it is |
+|---|---|
+| `config_b_pre_stage4b_ledger.csv` | The compute ledger as it stood before stage 4b (250 rows) |
+| `config_b_pre_stage4b_fingerprints.json` | The fingerprint registry as it stood before stage 4b, copied before the run (155 entries) |
+| `config_b_poststage4b_check_initial_buggy.py` | The first version of the post-stage-4b check, with a bug in its expected file set (below) |
+| `config_b_poststage4b_check_initial_failed.log` | Its failed output, saved when it ran |
+| `config_b_poststage4b_check.py` | The corrected post-stage-4b check, adapted from the stage 4a check |
+| `config_b_poststage4b_check.log` | Its output: all checks passed |
+| `config_b_post_stage4b_results_sha256.txt` | SHA-256 of all 681 result files after stage 4b, including the ledger. It is the baseline for checking that later stages preserve the earlier outputs |
+| `config_b_post_stage4b_full_test_suite.log` | Complete output of the full test suite after stage 4b (218 passed) |
+
+Stage 4b did not change the fingerprint registry: B0's audit folds reuse the 155 fingerprints already registered,
+since the registry is shared across arms. Only the ledger changed among the 480 files that existed after stage 4a.
+
+### The first post-stage-4b check failed because of a bug in the check, not in the run
+
+- **What failed:** the line `FAIL [2] folds/ holds exactly the 75 reference + 100 audit files (275)`. It listed
+  the 100 arm B audit files of stage 4a as unexpected. Every other line passed.
+- **Cause:** when the stage 4a check was adapted to B0, the expected set of fold files kept only the stage 3
+  reference files and the new B0 audit files, and left out the B audit files from stage 4a. Those files were
+  present and unchanged: the preservation check against `config_b_post_stage4a_results_sha256.txt` passed.
+- **Fix:** the expected set includes the audit files of both B and B0. That is the only change between the two
+  scripts (lines 99 to 103).
+- **The ledger and the run were never affected.**
+
+### How to rerun the check
+
+```
+.venv/bin/python -I docs/audits/config_b_poststage4b_check.py \
+    docs/audits/config_b_post_stage4a_results_sha256.txt docs/audits/config_b_pre_stage4b_ledger.csv \
+    docs/audits/config_b_pre_stage4b_fingerprints.json
+```
+
+It is meaningful only while the results are in their post-stage-4b state.
